@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "defaultSchema": "main",
+  "schemas": [
+    {
+      "name": "main",
+      "type": "custom",
+      "factory": "org.apache.calcite.adapter.jdbc.JdbcSchema$Factory",
+      "operand": {
+        "jdbcDriver": "org.duckdb.DuckDBDriver",
+        "jdbcUrl": "jdbc:duckdb:/home/smiatkin/projects/optimizers-p1/items.db",
+        "jdbcUser": "",
+        "jdbcPassword": ""
+      }
+    }
+  ]
+}

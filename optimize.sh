@@ -16,11 +16,19 @@ mkdir -p input/
 tar xzf "${WORKLOAD}" --directory input/
 
 # Feel free to add more steps here.
+rm -rf ./items.db
+cat ./input/data/schema.sql ./input/data/load.sql | ./duckdb items.db 
 
 # Build and run the Calcite app.
 cd calcite_app/
 ./gradlew build
 ./gradlew shadowJar
 ./gradlew --stop
-java -Xmx4096m -jar build/libs/calcite_app-1.0-SNAPSHOT-all.jar "../input/queries" "../${OUTPUT_DIR}"
+
+if [ $# -eq 3 ] 
+then
+	java -agentlib:jdwp=transport=dt_socket,server=y,address=5005 -Xmx4096m -jar build/libs/calcite_app-1.0-SNAPSHOT-all.jar "../input/queries" "../${OUTPUT_DIR}"
+else
+	java -Xmx4096m -jar build/libs/calcite_app-1.0-SNAPSHOT-all.jar "../input/queries" "../${OUTPUT_DIR}"
+fi
 cd -
