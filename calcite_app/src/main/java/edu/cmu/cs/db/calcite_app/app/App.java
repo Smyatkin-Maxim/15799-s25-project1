@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -217,16 +218,14 @@ public class App {
         String filename = inPath.getName().split("\\.")[0];
         App.execTime.put(filename, "failure");
         System.out.println("Trying " + filename);
-        String rawQuery = String.join(" ", Files.readAllLines(inPath.toPath()));
+        String rawQuery = String.join("\n", Files.readAllLines(inPath.toPath()));
+        Files.writeString(Paths.get(outPath.toString(), inPath.getName()), rawQuery);
         SqlNode parsedNode = parseSql(rawQuery);
         SqlNode validated = validator.validate(parsedNode);
         RelNode relNode = convertToRel(validated);
-        SerializePlan(relNode, new File("/dev/stdout"));
+        SerializePlan(relNode, Paths.get(outPath.toString(), filename + ".txt").toFile());
         RelNode optimized = optimize(relNode);
-        SerializePlan(optimized, new File("/dev/stdout"));
-        SqlNode optimizedSqlNode = new RelToSqlConverter(
-                DatabaseProduct.POSTGRESQL.getDialect()).visitRoot(optimized.getInput(0)).asStatement();
-        System.out.println(optimizedSqlNode.toSqlString(DatabaseProduct.POSTGRESQL.getDialect()));
+        SerializePlan(optimized, Paths.get(outPath.toString(), filename + "_optimized.txt").toFile());
         RelRunner runner = jdbcConn.unwrap(RelRunner.class);
         PreparedStatement stmt = runner.prepareStatement(optimized);
         long start = System.currentTimeMillis();
@@ -235,17 +234,21 @@ public class App {
         Future<ResultSet> future = executor.submit(new Task(stmt));
         ResultSet rs;
         try {
-            rs = future.get(40, TimeUnit.SECONDS);
+            rs = future.get(45, TimeUnit.SECONDS);
             String execTime = new Double(System.currentTimeMillis() - start).toString();
             App.execTime.put(filename, execTime + " ms");
             System.out.println(filename + " finished successfully in " + execTime + " ms");
+            SerializeResultSet(rs, Paths.get(outPath.toString(), filename + "_results.txt").toFile());
         } catch (TimeoutException e) {
             future.cancel(true);
             App.execTime.put(filename, "timeout");
-            throw e;
         } finally {
             executor.shutdownNow();
         }
+        SqlNode optimizedSqlNode = new RelToSqlConverter(
+                DatabaseProduct.POSTGRESQL.getDialect()).visitRoot(optimized.getInput(0)).asStatement();
+        Files.writeString(Paths.get(outPath.toString(), filename + "_optimized.sql"),
+                optimizedSqlNode.toSqlString(DatabaseProduct.POSTGRESQL.getDialect()).toString());
     }
 
     public static void main(String[] args) throws Exception {
@@ -281,6 +284,6 @@ public class App {
                 System.err.println(e.getMessage());
             }
         }
-        execTime.forEach((key, value) -> System.out.println(key + " took " + value));
+        execTime.forEach((key, value) -> System.out.println(key + " " + value));
     }
 }

@@ -9,6 +9,7 @@ echo "Invoking optimize.sh."
 echo -e "\tWorkload: ${WORKLOAD}"
 echo -e "\tOutput Dir: ${OUTPUT_DIR}"
 
+rm -rf $OUTPUT_DIR
 mkdir -p "${OUTPUT_DIR}"
 mkdir -p input/
 
