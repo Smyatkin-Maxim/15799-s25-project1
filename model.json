@@ -8,7 +8,7 @@
       "factory": "org.apache.calcite.adapter.jdbc.JdbcSchema$Factory",
       "operand": {
         "jdbcDriver": "org.duckdb.DuckDBDriver",
-        "jdbcUrl": "jdbc:duckdb:/home/smiatkin/projects/optimizers-p1/items.db",
+        "jdbcUrl": "jdbc:duckdb:../items.db",
         "jdbcUser": "",
         "jdbcPassword": ""
       }

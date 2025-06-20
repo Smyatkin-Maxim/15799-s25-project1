@@ -12,6 +12,11 @@
 - - 9 queries pass
 - - 9 queries timeout
 - - 8 queries fail, mostly due to `variable $cor0 is not found`
+- I've decided to do statistics "the right way" - that is implementing my own schema and in-memory table type.
+- The result is almost no queries are passing due to many unsupported conversions and type casts (still no idea why it tries to convert date to int in q7).
+- Another weirdness - when I add unique columns stats Calcite gives me bogus SQL which is a) plain wrong; b) ambiguous. Had to forfeit this idea for now, though I expected it to be helpful in many rewrites and cost estimates.
+- Kinda regret trying to write my own scannable table type. I could have made things much easier just by extending JdbcSchema with stats.
+- At this point I still feel quite blind: docs still suck and everything looks like a bunch of random changes to see what works, without real understanding why.
 
 **Conclusions**
 

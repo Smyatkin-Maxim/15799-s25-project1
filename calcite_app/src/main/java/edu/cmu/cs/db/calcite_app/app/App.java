@@ -89,7 +89,6 @@ public class App {
 
     private static RelOptCluster cluster;
     private static CalciteConnection conn;
-    private static Connection jdbcConn;
     private static Schema schema;
     private static SqlValidator validator;
     private static VolcanoPlanner planner;
@@ -133,10 +132,11 @@ public class App {
 
     private static void createSchema() throws Exception {
         Properties info = new Properties();
-        info.put("model", "/home/smiatkin/projects/optimizers-p1/model.json");
-        jdbcConn = DriverManager.getConnection("jdbc:calcite:", info);
-        conn = jdbcConn.unwrap(CalciteConnection.class);
+        info.setProperty(CalciteConnectionProperty.CASE_SENSITIVE.camelName()
+                , "false");
+        conn = DriverManager.getConnection("jdbc:calcite:", info).unwrap(CalciteConnection.class);
         App.schema = conn.getRootSchema();
+        conn.getRootSchema().add("main", new DuckDBSchema());
     }
 
     private static SqlNode parseSql(String sql) throws Exception {
@@ -206,6 +206,12 @@ public class App {
     private static RelNode optimize(RelNode unoptimizedRelNode) {
         RelOptUtil.registerDefaultRules(planner, false, false);
         EnumerableRules.ENUMERABLE_RULES.forEach(planner::addRule);
+        planner.addRule(CoreRules.CALC_SPLIT);
+        planner.addRule(CoreRules.FILTER_SCAN);
+        planner.addRule(CoreRules.FILTER_INTERPRETER_SCAN);
+        planner.addRule(CoreRules.PROJECT_TABLE_SCAN);
+        planner.addRule(CoreRules.PROJECT_INTERPRETER_TABLE_SCAN);
+        planner.addRule(CoreRules.AGGREGATE_REDUCE_FUNCTIONS);
         planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE);
         RelNode optimized = unoptimizedRelNode;
         optimized = planner.changeTraits(optimized,
@@ -216,6 +222,9 @@ public class App {
 
     private static void runQuery(File inPath, File outPath) throws Exception {
         String filename = inPath.getName().split("\\.")[0];
+        if (filename.equals("q7")) {
+            return;
+        }
         App.execTime.put(filename, "failure");
         System.out.println("Trying " + filename);
         String rawQuery = String.join("\n", Files.readAllLines(inPath.toPath()));
@@ -226,10 +235,13 @@ public class App {
         SerializePlan(relNode, Paths.get(outPath.toString(), filename + ".txt").toFile());
         RelNode optimized = optimize(relNode);
         SerializePlan(optimized, Paths.get(outPath.toString(), filename + "_optimized.txt").toFile());
-        RelRunner runner = jdbcConn.unwrap(RelRunner.class);
+        RelRunner runner = conn.unwrap(RelRunner.class);
         PreparedStatement stmt = runner.prepareStatement(optimized);
         long start = System.currentTimeMillis();
-
+        SqlNode optimizedSqlNode = new RelToSqlConverter(
+                DatabaseProduct.DUCKDB.getDialect()).visitRoot(optimized).asStatement();
+        Files.writeString(Paths.get(outPath.toString(), filename + "_optimized.sql"),
+                optimizedSqlNode.toSqlString(DatabaseProduct.DUCKDB.getDialect()).toString());
         ExecutorService executor = Executors.newSingleThreadExecutor();
         Future<ResultSet> future = executor.submit(new Task(stmt));
         ResultSet rs;
@@ -245,10 +257,6 @@ public class App {
         } finally {
             executor.shutdownNow();
         }
-        SqlNode optimizedSqlNode = new RelToSqlConverter(
-                DatabaseProduct.POSTGRESQL.getDialect()).visitRoot(optimized.getInput(0)).asStatement();
-        Files.writeString(Paths.get(outPath.toString(), filename + "_optimized.sql"),
-                optimizedSqlNode.toSqlString(DatabaseProduct.POSTGRESQL.getDialect()).toString());
     }
 
     public static void main(String[] args) throws Exception {
@@ -277,12 +285,12 @@ public class App {
         App.execTime = new HashMap<java.lang.String, java.lang.String>();
 
         for (File sqlfile : files) {
-            try {
+        //    try {
                 runQuery(sqlfile, new File(out_path));
-            } catch (Exception e) {
-                System.err.println(sqlfile.getName() + " failed");
-                System.err.println(e.getMessage());
-            }
+        //    } catch (Exception e) {
+        //        System.err.println(sqlfile.getName() + " failed");
+        //        System.err.println(e.getMessage());
+        //    }
         }
         execTime.forEach((key, value) -> System.out.println(key + " " + value));
     }
