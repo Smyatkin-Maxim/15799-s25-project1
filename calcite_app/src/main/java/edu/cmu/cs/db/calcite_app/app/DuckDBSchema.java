@@ -22,7 +22,8 @@ public class DuckDBSchema extends AbstractSchema {
         tableMap = createTableMap();
     }
 
-    @Override protected Map<String, Table> getTableMap() {
+    @Override
+    protected Map<String, Table> getTableMap() {
         if (tableMap == null) {
             try {
                 tableMap = createTableMap();

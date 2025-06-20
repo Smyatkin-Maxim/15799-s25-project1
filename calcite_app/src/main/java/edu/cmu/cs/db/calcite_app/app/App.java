@@ -39,6 +39,7 @@ import org.apache.calcite.plan.Contexts;
 import org.apache.calcite.plan.ConventionTraitDef;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptCostImpl;
+import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
@@ -132,8 +133,7 @@ public class App {
 
     private static void createSchema() throws Exception {
         Properties info = new Properties();
-        info.setProperty(CalciteConnectionProperty.CASE_SENSITIVE.camelName()
-                , "false");
+        info.setProperty(CalciteConnectionProperty.CASE_SENSITIVE.camelName(), "false");
         conn = DriverManager.getConnection("jdbc:calcite:", info).unwrap(CalciteConnection.class);
         App.schema = conn.getRootSchema();
         conn.getRootSchema().add("main", new DuckDBSchema());
@@ -204,15 +204,21 @@ public class App {
     }
 
     private static RelNode optimize(RelNode unoptimizedRelNode) {
-        RelOptUtil.registerDefaultRules(planner, false, false);
-        EnumerableRules.ENUMERABLE_RULES.forEach(planner::addRule);
-        planner.addRule(CoreRules.CALC_SPLIT);
-        planner.addRule(CoreRules.FILTER_SCAN);
-        planner.addRule(CoreRules.FILTER_INTERPRETER_SCAN);
-        planner.addRule(CoreRules.PROJECT_TABLE_SCAN);
-        planner.addRule(CoreRules.PROJECT_INTERPRETER_TABLE_SCAN);
-        planner.addRule(CoreRules.AGGREGATE_REDUCE_FUNCTIONS);
-        planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE);
+        // join rules
+        planner.addRule(CoreRules.FILTER_INTO_JOIN);
+        planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
+        planner.addRule(CoreRules.JOIN_COMMUTE);
+        planner.addRule(CoreRules.JOIN_ASSOCIATE);
+        planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
+
+        planner.addRule(EnumerableRules.ENUMERABLE_SORT_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_PROJECT_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_FILTER_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_VALUES_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_TABLE_SCAN_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_AGGREGATE_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_CORRELATE_RULE);
         RelNode optimized = unoptimizedRelNode;
         optimized = planner.changeTraits(optimized,
                 cluster.traitSet().replace(EnumerableConvention.INSTANCE));
@@ -222,9 +228,6 @@ public class App {
 
     private static void runQuery(File inPath, File outPath) throws Exception {
         String filename = inPath.getName().split("\\.")[0];
-        if (filename.equals("q7")) {
-            return;
-        }
         App.execTime.put(filename, "failure");
         System.out.println("Trying " + filename);
         String rawQuery = String.join("\n", Files.readAllLines(inPath.toPath()));
@@ -285,12 +288,12 @@ public class App {
         App.execTime = new HashMap<java.lang.String, java.lang.String>();
 
         for (File sqlfile : files) {
-        //    try {
+            try {
                 runQuery(sqlfile, new File(out_path));
-        //    } catch (Exception e) {
-        //        System.err.println(sqlfile.getName() + " failed");
-        //        System.err.println(e.getMessage());
-        //    }
+            } catch (Exception e) {
+                System.err.println(sqlfile.getName() + " failed");
+                System.err.println(e.getMessage());
+            }
         }
         execTime.forEach((key, value) -> System.out.println(key + " " + value));
     }

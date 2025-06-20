@@ -1,7 +1,9 @@
 package edu.cmu.cs.db.calcite_app.app;
 
 import java.sql.Connection;
+import java.sql.Date;
 import java.sql.ResultSet;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -11,6 +13,7 @@ import org.apache.calcite.linq4j.Enumerable;
 import org.apache.calcite.linq4j.Linq4j;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.runtime.SqlFunctions;
 import org.apache.calcite.schema.ScannableTable;
 import org.apache.calcite.schema.Statistic;
 import org.apache.calcite.schema.Statistics;
@@ -77,11 +80,13 @@ public class DuckDBTable extends AbstractTable
         final List<ImmutableBitSet> keys = new ArrayList<>();
         // NOTE: was hoping that Calcite can use this information for better plans
         // but instead it generates bogus SQL, at least in duckdb opinion
-        /*for (Column c : columns) {
-            if (c.unique) {
-                keys.add(ImmutableBitSet.of(c.id));
-            }
-        }*/
+        /*
+         * for (Column c : columns) {
+         * if (c.unique) {
+         * keys.add(ImmutableBitSet.of(c.id));
+         * }
+         * }
+         */
         return Statistics.of(cardinality(), keys);
     }
 
@@ -129,6 +134,9 @@ public class DuckDBTable extends AbstractTable
             Object[] row = new Object[columns.size()];
             for (int i = 0; i < columns.size(); i++) {
                 row[i] = rs.getObject(i + 1);
+                if (row[i] instanceof java.time.LocalDate) {
+                    row[i] = Date.valueOf((java.time.LocalDate) row[i]);
+                }
             }
             data.add(row);
         }
