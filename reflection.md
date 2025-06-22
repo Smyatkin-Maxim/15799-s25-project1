@@ -17,6 +17,8 @@
 - Another weirdness - when I add unique columns stats Calcite gives me bogus SQL which is a) plain wrong; b) ambiguous. Had to forfeit this idea for now, though I expected it to be helpful in many rewrites and cost estimates.
 - Kinda regret trying to write my own scannable table type. I could have made things much easier just by extending JdbcSchema with stats.
 - At this point I still feel quite blind: docs still suck and everything looks like a bunch of random changes to see what works, without real understanding why.
+- Things started to making sense, somewhat. I noticed that a bunch of queries failed to convert LogicalFilters and what's common is that they all have subqueries in filter inputs. I tried decorrellation intuitively and failed. Then I looked into Calcite Unit tests to look for examples of decorrelation and turns out that I first need to manually (i.e. with some core rules) convert subqueries to correlate nodes and only than I can decorrelate. Which kinda makes sense.
+- Now more queries are passing, but there are some OOM. I wanna make sure that I'm pushing down filters properly now.
 
 **Conclusions**
 

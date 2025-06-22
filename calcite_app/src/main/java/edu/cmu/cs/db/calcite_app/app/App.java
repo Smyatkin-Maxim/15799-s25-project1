@@ -42,6 +42,8 @@ import org.apache.calcite.plan.RelOptCostImpl;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptUtil;
+import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.plan.hep.HepProgram;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.prepare.CalciteCatalogReader;
 import org.apache.calcite.prepare.Prepare;
@@ -66,6 +68,7 @@ import org.apache.calcite.sql.util.ChainedSqlOperatorTable;
 import org.apache.calcite.sql.util.SqlOperatorTables;
 import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.sql.validate.SqlValidatorUtil;
+import org.apache.calcite.sql2rel.RelDecorrelator;
 import org.apache.calcite.sql2rel.SqlToRelConverter;
 import org.apache.calcite.sql2rel.StandardConvertletTable;
 import org.apache.calcite.tools.Program;
@@ -73,6 +76,8 @@ import org.apache.calcite.tools.Programs;
 import org.apache.calcite.tools.RelRunner;
 import org.apache.calcite.tools.RuleSet;
 import org.apache.calcite.tools.RuleSets;
+
+import com.google.common.collect.ImmutableList;
 
 public class App {
     static class Task implements Callable<ResultSet> {
@@ -203,13 +208,40 @@ public class App {
         return converter.convertQuery(validatedNode, false, true).rel;
     }
 
+    private static RelNode decorellate(RelNode original) {
+        HepProgram hepProgram = HepProgram.builder()
+                .addRuleCollection(
+                        ImmutableList.of(
+                                // SubQuery program rules
+                                CoreRules.FILTER_SUB_QUERY_TO_CORRELATE,
+                                CoreRules.PROJECT_SUB_QUERY_TO_CORRELATE,
+                                CoreRules.JOIN_SUB_QUERY_TO_CORRELATE,
+                                // plus FilterAggregateTransposeRule
+                                CoreRules.FILTER_AGGREGATE_TRANSPOSE,
+                                CoreRules.FILTER_PROJECT_TRANSPOSE))
+                .build();
+        Program program = Programs.of(hepProgram, true, cluster.getMetadataProvider());
+        RelNode corellated = program.run(cluster.getPlanner(), original, cluster.traitSet(),
+                Collections.emptyList(), Collections.emptyList());
+        return RelDecorrelator.decorrelateQuery(corellated);
+    }
+
     private static RelNode optimize(RelNode unoptimizedRelNode) {
+        unoptimizedRelNode = decorellate(unoptimizedRelNode);
+
         // join rules
         planner.addRule(CoreRules.FILTER_INTO_JOIN);
         planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
         planner.addRule(CoreRules.JOIN_COMMUTE);
         planner.addRule(CoreRules.JOIN_ASSOCIATE);
+        planner.addRule(CoreRules.AGGREGATE_PROJECT_MERGE);
         planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
+
+        // planner.addRule(CoreRules.AGGREGATE_FILTER_TRANSPOSE);
+        // planner.addRule(CoreRules.FILTER_PROJECT_TRANSPOSE);
+        // planner.addRule(CoreRules.FILTER_CORRELATE);
+        // planner.addRule(CoreRules.PROJECT_TO_CALC);
+        // planner.addRule(CoreRules.FILTER_TO_CALC);
 
         planner.addRule(EnumerableRules.ENUMERABLE_SORT_RULE);
         planner.addRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
@@ -219,11 +251,12 @@ public class App {
         planner.addRule(EnumerableRules.ENUMERABLE_TABLE_SCAN_RULE);
         planner.addRule(EnumerableRules.ENUMERABLE_AGGREGATE_RULE);
         planner.addRule(EnumerableRules.ENUMERABLE_CORRELATE_RULE);
-        RelNode optimized = unoptimizedRelNode;
-        optimized = planner.changeTraits(optimized,
-                cluster.traitSet().replace(EnumerableConvention.INSTANCE));
-        planner.setRoot(optimized);
-        return planner.findBestExp();
+        planner.addRule(EnumerableRules.ENUMERABLE_FILTER_TO_CALC_RULE);
+        Program program = Programs.of(RuleSets.ofList(planner.getRules()));
+        RelTraitSet toTraits = unoptimizedRelNode.getTraitSet()
+                .replace(EnumerableConvention.INSTANCE);
+        return program.run(planner, unoptimizedRelNode, toTraits,
+                ImmutableList.of(), ImmutableList.of());
     }
 
     private static void runQuery(File inPath, File outPath) throws Exception {
