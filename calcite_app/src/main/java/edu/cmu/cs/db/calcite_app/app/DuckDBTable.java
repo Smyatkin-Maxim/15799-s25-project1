@@ -87,7 +87,7 @@ public class DuckDBTable extends AbstractTable
          * }
          * }
          */
-        return Statistics.of(cardinality(), keys);
+        return Statistics.of(cardinality(), keys, new ArrayList<>());
     }
 
     public List<Column> getColumns() throws Exception {
@@ -120,10 +120,11 @@ public class DuckDBTable extends AbstractTable
     }
 
     private int nDistinct(String column) throws Exception {
-        ResultSet rs = conn.prepareStatement("select count(distinct \"" + column + "\") from \"" + name + "\"")
+        /*ResultSet rs = conn.prepareStatement("select count(distinct \"" + column + "\") from \"" + name + "\"")
                 .executeQuery();
         rs.next();
-        return rs.getInt(1);
+        return rs.getInt(1);*/
+        return 1;
     }
 
     private List<Object[]> materialize() throws Exception {
