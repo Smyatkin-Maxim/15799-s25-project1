@@ -19,6 +19,7 @@
 - At this point I still feel quite blind: docs still suck and everything looks like a bunch of random changes to see what works, without real understanding why.
 - Things started to making sense, somewhat. I noticed that a bunch of queries failed to convert LogicalFilters and what's common is that they all have subqueries in filter inputs. I tried decorrellation intuitively and failed. Then I looked into Calcite Unit tests to look for examples of decorrelation and turns out that I first need to manually (i.e. with some core rules) convert subqueries to correlate nodes and only than I can decorrelate. Which kinda makes sense.
 - Now more queries are passing, but there are some OOM. I wanna make sure that I'm pushing down filters properly now.
+- My custom set of rules managed to execute 15 queries properly, but then I tried default rules w/o merge join and limit sort rule. And it seems to be almost good enough: 19 queries execute fine, 1 times out and 5 fail to execute enumerable limit and 1 exceed java heap size (OOM)
 
 **Conclusions**
 

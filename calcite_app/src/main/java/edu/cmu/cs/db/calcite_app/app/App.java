@@ -47,6 +47,7 @@ import org.apache.calcite.plan.hep.HepProgram;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.prepare.CalciteCatalogReader;
 import org.apache.calcite.prepare.Prepare;
+import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.externalize.RelWriterImpl;
 import org.apache.calcite.rel.rel2sql.RelToSqlConverter;
@@ -229,29 +230,11 @@ public class App {
     private static RelNode optimize(RelNode unoptimizedRelNode) {
         unoptimizedRelNode = decorellate(unoptimizedRelNode);
 
-        // join rules
-        planner.addRule(CoreRules.FILTER_INTO_JOIN);
-        planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
-        planner.addRule(CoreRules.JOIN_COMMUTE);
-        planner.addRule(CoreRules.JOIN_ASSOCIATE);
-        planner.addRule(CoreRules.AGGREGATE_PROJECT_MERGE);
-        planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
+        RelOptUtil.registerDefaultRules(planner, false, false);
+        EnumerableRules.ENUMERABLE_RULES.forEach(planner::addRule);
+        planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE);
+        planner.removeRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
 
-        // planner.addRule(CoreRules.AGGREGATE_FILTER_TRANSPOSE);
-        // planner.addRule(CoreRules.FILTER_PROJECT_TRANSPOSE);
-        // planner.addRule(CoreRules.FILTER_CORRELATE);
-        // planner.addRule(CoreRules.PROJECT_TO_CALC);
-        // planner.addRule(CoreRules.FILTER_TO_CALC);
-
-        planner.addRule(EnumerableRules.ENUMERABLE_SORT_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_PROJECT_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_FILTER_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_VALUES_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_TABLE_SCAN_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_AGGREGATE_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_CORRELATE_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_FILTER_TO_CALC_RULE);
         Program program = Programs.of(RuleSets.ofList(planner.getRules()));
         RelTraitSet toTraits = unoptimizedRelNode.getTraitSet()
                 .replace(EnumerableConvention.INSTANCE);
@@ -259,8 +242,11 @@ public class App {
                 ImmutableList.of(), ImmutableList.of());
     }
 
-    private static void runQuery(File inPath, File outPath) throws Exception {
+    private static void runQuery(File inPath, File outPath, String queryFile) throws Exception {
         String filename = inPath.getName().split("\\.")[0];
+        if (queryFile != null && !filename.equals(queryFile)) {
+            return;
+        }
         App.execTime.put(filename, "failure");
         System.out.println("Trying " + filename);
         String rawQuery = String.join("\n", Files.readAllLines(inPath.toPath()));
@@ -306,6 +292,10 @@ public class App {
         System.out.println("\tArg1: " + in_path);
         String out_path = args[1];
         System.out.println("\tArg2: " + out_path);
+        String queryFile = null;
+        if (args.length == 3) {
+            queryFile = args[2];
+        }
 
         System.out.println("Running queries");
         File dir = new File(in_path);
@@ -322,7 +312,7 @@ public class App {
 
         for (File sqlfile : files) {
             try {
-                runQuery(sqlfile, new File(out_path));
+                runQuery(sqlfile, new File(out_path), queryFile);
             } catch (Exception e) {
                 System.err.println(sqlfile.getName() + " failed");
                 System.err.println(e.getMessage());

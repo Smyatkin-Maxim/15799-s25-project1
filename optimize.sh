@@ -28,8 +28,8 @@ cd calcite_app/
 
 if [ $# -eq 3 ] 
 then
-	java -agentlib:jdwp=transport=dt_socket,server=y,address=5005 -Xms4096m -Xmx8096m -jar build/libs/calcite_app-1.0-SNAPSHOT-all.jar "../input/queries" "../${OUTPUT_DIR}"
+    java -Xms4096m -Xmx8096m -jar build/libs/calcite_app-1.0-SNAPSHOT-all.jar "../input/queries" "../${OUTPUT_DIR}" $3
 else
-	java -Xms4096m -Xmx8096m -jar build/libs/calcite_app-1.0-SNAPSHOT-all.jar "../input/queries" "../${OUTPUT_DIR}"
+    java -Xms4096m -Xmx8096m -jar build/libs/calcite_app-1.0-SNAPSHOT-all.jar "../input/queries" "../${OUTPUT_DIR}"
 fi
 cd -
