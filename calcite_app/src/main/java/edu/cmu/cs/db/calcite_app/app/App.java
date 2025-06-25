@@ -233,7 +233,7 @@ public class App {
         RelOptUtil.registerDefaultRules(planner, false, false);
         EnumerableRules.ENUMERABLE_RULES.forEach(planner::addRule);
         planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE);
-        planner.removeRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
 
         Program program = Programs.of(RuleSets.ofList(planner.getRules()));
         RelTraitSet toTraits = unoptimizedRelNode.getTraitSet()
