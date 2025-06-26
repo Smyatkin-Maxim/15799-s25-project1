@@ -21,6 +21,8 @@
 - Now more queries are passing, but there are some OOM. I wanna make sure that I'm pushing down filters properly now.
 - My custom set of rules managed to execute 15 queries properly, but then I tried default rules w/o merge join and limit sort rule. And it seems to be almost good enough: 19 queries execute fine, 1 times out and 5 fail to execute enumerable limit and 1 exceed java heap size (OOM)
 - Got all but two queries passing: q19 TO and q9 OOM. Just turned TopN rule back. Turned it down simply because someone in the Internat wrote that it doesn't work. Don't trust the Internet :smiley:
+- Quick look at q19 shows that there is a very sub-optimal LogicalFilter like `(A and B and C) or (A and D and C) or (A and Z and C)`. And to my surprise whatever I do there seem to be no rules in Calcite to transform it to `A and C and (B or D or Z)`. Some googling, or rather GPTing cuz searching anything on Calcite is quite hard, shows that there is a RexNode pullFactors method that might help. As far as I understand I should implement some rule or operator myself
+- Yep, writing a Rule to pull common factors from LogicalFilter turned out being quite trivial using RexNode.pullFactors
 
 **Conclusions**
 

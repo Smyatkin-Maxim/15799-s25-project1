@@ -219,7 +219,9 @@ public class App {
                                 CoreRules.JOIN_SUB_QUERY_TO_CORRELATE,
                                 // plus FilterAggregateTransposeRule
                                 CoreRules.FILTER_AGGREGATE_TRANSPOSE,
-                                CoreRules.FILTER_PROJECT_TRANSPOSE))
+                                CoreRules.FILTER_PROJECT_TRANSPOSE,
+                                // q19
+                                FilterPullFactorsRule.Config.DEFAULT.toRule()))
                 .build();
         Program program = Programs.of(hepProgram, true, cluster.getMetadataProvider());
         RelNode corellated = program.run(cluster.getPlanner(), original, cluster.traitSet(),
@@ -231,9 +233,20 @@ public class App {
         unoptimizedRelNode = decorellate(unoptimizedRelNode);
 
         RelOptUtil.registerDefaultRules(planner, false, false);
-        EnumerableRules.ENUMERABLE_RULES.forEach(planner::addRule);
         planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE);
         planner.addRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
+
+        /*planner.addRule(CoreRules.FILTER_INTO_JOIN);
+        planner.addRule(CoreRules.FILTER_MERGE);
+        //planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
+        //planner.addRule(CoreRules.JOIN_PUSH_TRANSITIVE_PREDICATES);
+        planner.addRule(CoreRules.FILTER_REDUCE_EXPRESSIONS);
+        planner.addRule(CoreRules.JOIN_REDUCE_EXPRESSIONS);
+        //planner.addRule(CoreRules.JOIN_PUSH_EXPRESSIONS);
+        //planner.addRule(CoreRules.PROJECT_REDUCE_EXPRESSIONS);
+        //planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
+        //planner.addRule(CoreRules.MULTI_JOIN_BOTH_PROJECT);
+        //planner.addRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);*/
 
         Program program = Programs.of(RuleSets.ofList(planner.getRules()));
         RelTraitSet toTraits = unoptimizedRelNode.getTraitSet()
