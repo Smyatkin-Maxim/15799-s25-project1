@@ -2,8 +2,8 @@ package edu.cmu.cs.db.calcite_app.app;
 
 import java.sql.Connection;
 import java.sql.Date;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -13,7 +13,6 @@ import org.apache.calcite.linq4j.Enumerable;
 import org.apache.calcite.linq4j.Linq4j;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
-import org.apache.calcite.runtime.SqlFunctions;
 import org.apache.calcite.schema.ScannableTable;
 import org.apache.calcite.schema.Statistic;
 import org.apache.calcite.schema.Statistics;
@@ -44,7 +43,7 @@ public class DuckDBTable extends AbstractTable
 
     private Connection conn;
     private String name;
-    private List<Object[]> data;
+    private Object[][] data;
     private List<Column> columns;
     private RelDataType rowType;
 
@@ -107,7 +106,7 @@ public class DuckDBTable extends AbstractTable
 
     public int cardinality() {
         if (data != null) {
-            return data.size();
+            return data.length;
         }
         try {
             ResultSet rs = conn.prepareStatement("select count(*) from " + name).executeQuery();
@@ -127,20 +126,23 @@ public class DuckDBTable extends AbstractTable
         return 1;
     }
 
-    private List<Object[]> materialize() throws Exception {
+    private Object[][] materialize() throws Exception {
         System.out.println("Materializing " + name);
-        data = new ArrayList<Object[]>(cardinality());
-        ResultSet rs = conn.prepareStatement("select * from " + name).executeQuery();
+        data = new Object[cardinality()][columns.size()];
+        PreparedStatement ps = conn.prepareStatement("select * from " + name);
+        ResultSet rs = ps.executeQuery();
+        int rowId = 0;
         while (rs.next()) {
-            Object[] row = new Object[columns.size()];
             for (int i = 0; i < columns.size(); i++) {
-                row[i] = rs.getObject(i + 1);
-                if (row[i] instanceof java.time.LocalDate) {
-                    row[i] = Date.valueOf((java.time.LocalDate) row[i]);
+                data[rowId][i] = rs.getObject(i + 1);
+                if (data[rowId][i] instanceof java.time.LocalDate) {
+                    data[rowId][i] = Date.valueOf((java.time.LocalDate) data[rowId][i]);
                 }
             }
-            data.add(row);
+            rowId++;
         }
+        rs.close();
+        ps.close();
         return data;
     }
 }

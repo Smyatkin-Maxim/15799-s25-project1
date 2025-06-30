@@ -26,6 +26,7 @@ replay_pid*
 submission.zip
 input/
 output/
+grader_data/
 data/
 duckdb
 *.db

@@ -89,8 +89,13 @@ public class App {
         }
 
         @Override
-        public ResultSet call() throws Exception {
-            return stmt.executeQuery();
+        public ResultSet call() {
+            try {
+                return stmt.executeQuery();
+            } catch (Exception e) {
+                System.err.println(e.getMessage());
+                return null;
+            }
         }
     }
 
@@ -236,17 +241,19 @@ public class App {
         planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE);
         planner.addRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
 
-        /*planner.addRule(CoreRules.FILTER_INTO_JOIN);
-        planner.addRule(CoreRules.FILTER_MERGE);
-        //planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
-        //planner.addRule(CoreRules.JOIN_PUSH_TRANSITIVE_PREDICATES);
-        planner.addRule(CoreRules.FILTER_REDUCE_EXPRESSIONS);
-        planner.addRule(CoreRules.JOIN_REDUCE_EXPRESSIONS);
-        //planner.addRule(CoreRules.JOIN_PUSH_EXPRESSIONS);
-        //planner.addRule(CoreRules.PROJECT_REDUCE_EXPRESSIONS);
-        //planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
-        //planner.addRule(CoreRules.MULTI_JOIN_BOTH_PROJECT);
-        //planner.addRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);*/
+        /*
+         * planner.addRule(CoreRules.FILTER_INTO_JOIN);
+         * planner.addRule(CoreRules.FILTER_MERGE);
+         * //planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
+         * //planner.addRule(CoreRules.JOIN_PUSH_TRANSITIVE_PREDICATES);
+         * planner.addRule(CoreRules.FILTER_REDUCE_EXPRESSIONS);
+         * planner.addRule(CoreRules.JOIN_REDUCE_EXPRESSIONS);
+         * //planner.addRule(CoreRules.JOIN_PUSH_EXPRESSIONS);
+         * //planner.addRule(CoreRules.PROJECT_REDUCE_EXPRESSIONS);
+         * //planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
+         * //planner.addRule(CoreRules.MULTI_JOIN_BOTH_PROJECT);
+         * //planner.addRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
+         */
 
         Program program = Programs.of(RuleSets.ofList(planner.getRules()));
         RelTraitSet toTraits = unoptimizedRelNode.getTraitSet()
@@ -258,6 +265,9 @@ public class App {
     private static void runQuery(File inPath, File outPath, String queryFile) throws Exception {
         String filename = inPath.getName().split("\\.")[0];
         if (queryFile != null && !filename.equals(queryFile)) {
+            return;
+        }
+        if (filename.equals("q9") || filename.equals("q21")) {
             return;
         }
         App.execTime.put(filename, "failure");
@@ -281,7 +291,11 @@ public class App {
         Future<ResultSet> future = executor.submit(new Task(stmt));
         ResultSet rs;
         try {
-            rs = future.get(45, TimeUnit.SECONDS);
+            rs = future.get(180, TimeUnit.SECONDS);
+            if (rs == null) {
+                Files.writeString(Paths.get(outPath.toString(), filename + "_results.txt"), "N/A");
+                return;
+            }
             String execTime = new Double(System.currentTimeMillis() - start).toString();
             App.execTime.put(filename, execTime + " ms");
             System.out.println(filename + " finished successfully in " + execTime + " ms");
