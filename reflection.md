@@ -23,6 +23,10 @@
 - Got all but two queries passing: q19 TO and q9 OOM. Just turned TopN rule back. Turned it down simply because someone in the Internat wrote that it doesn't work. Don't trust the Internet :smiley:
 - Quick look at q19 shows that there is a very sub-optimal LogicalFilter like `(A and B and C) or (A and D and C) or (A and Z and C)`. And to my surprise whatever I do there seem to be no rules in Calcite to transform it to `A and C and (B or D or Z)`. Some googling, or rather GPTing cuz searching anything on Calcite is quite hard, shows that there is a RexNode pullFactors method that might help. As far as I understand I should implement some rule or operator myself
 - Yep, writing a Rule to pull common factors from LogicalFilter turned out being quite trivial using RexNode.pullFactors
+- After spending a while trying to figure out a proper way to fix OOMs in q9 and q21 I've decided to ditch it for now and try to submit the little that I have to gradescope. There was some struggle with gradescope as it had some expectations for java heap size, lack of missing files even if a query failed and some other staff. But I finally got my submission graded, for ~60.
+- It turns out you can take a look at "reference solution"`s optimized plans and see what you miss.
+- I still couldn't get any more optimizations after two evenings of struggle. I believe the biggest problem is that I took default preset of Calcite rules and try to play around it. It's a good starting point **BUT** it's hard to improve on it cuz you cannot possibly keep all the 100+ rules from the preset and thoughtfully improve on it.  
+So I've decided to take a step back and start thoughtfully from the most nominalistic rule-set. 
 
 **Conclusions**
 
