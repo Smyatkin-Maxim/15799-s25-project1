@@ -5,14 +5,19 @@ import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 import org.apache.calcite.DataContext;
 import org.apache.calcite.linq4j.Enumerable;
+import org.apache.calcite.linq4j.Enumerator;
 import org.apache.calcite.linq4j.Linq4j;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.runtime.SqlFunctions;
+import org.apache.calcite.schema.ProjectableFilterableTable;
 import org.apache.calcite.schema.ScannableTable;
 import org.apache.calcite.schema.Statistic;
 import org.apache.calcite.schema.Statistics;
@@ -23,7 +28,7 @@ import org.apache.calcite.util.Pair;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class DuckDBTable extends AbstractTable
-        implements ScannableTable {
+        implements ScannableTable/* , ProjectableFilterableTable */ {
 
     public class Column {
         public String name;
@@ -74,6 +79,14 @@ public class DuckDBTable extends AbstractTable
         return Linq4j.asEnumerable(this.data);
     }
 
+    /*
+     * @Override
+     * public Enumerable<@Nullable Object[]> scan(DataContext root, List<RexNode>
+     * filters, int @Nullable [] projects) {
+     * return new DuckDBProjectableEnumerable(projects, data);
+     * }
+     */
+
     @Override
     public Statistic getStatistic() {
         final List<ImmutableBitSet> keys = new ArrayList<>();
@@ -119,10 +132,13 @@ public class DuckDBTable extends AbstractTable
     }
 
     private int nDistinct(String column) throws Exception {
-        /*ResultSet rs = conn.prepareStatement("select count(distinct \"" + column + "\") from \"" + name + "\"")
-                .executeQuery();
-        rs.next();
-        return rs.getInt(1);*/
+        /*
+         * ResultSet rs = conn.prepareStatement("select count(distinct \"" + column +
+         * "\") from \"" + name + "\"")
+         * .executeQuery();
+         * rs.next();
+         * return rs.getInt(1);
+         */
         return 1;
     }
 

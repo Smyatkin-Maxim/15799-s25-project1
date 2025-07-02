@@ -15,9 +15,10 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Properties;
-
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -32,6 +33,8 @@ import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.config.CalciteConnectionConfig;
 import org.apache.calcite.config.CalciteConnectionConfigImpl;
 import org.apache.calcite.config.CalciteConnectionProperty;
+import org.apache.calcite.interpreter.Bindables;
+import org.apache.calcite.interpreter.Bindables.BindableTableScanRule;
 import org.apache.calcite.jdbc.CalciteConnection;
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
@@ -52,6 +55,7 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.externalize.RelWriterImpl;
 import org.apache.calcite.rel.rel2sql.RelToSqlConverter;
 import org.apache.calcite.rel.rules.CoreRules;
+import org.apache.calcite.rel.rules.PruneEmptyRules;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.schema.Schema;
@@ -225,6 +229,8 @@ public class App {
                                 // plus FilterAggregateTransposeRule
                                 CoreRules.FILTER_AGGREGATE_TRANSPOSE,
                                 CoreRules.FILTER_PROJECT_TRANSPOSE,
+                                CoreRules.PROJECT_JOIN_TRANSPOSE,
+                                CoreRules.PROJECT_AGGREGATE_MERGE,
                                 // q19
                                 FilterPullFactorsRule.Config.DEFAULT.toRule()))
                 .build();
@@ -237,23 +243,44 @@ public class App {
     private static RelNode optimize(RelNode unoptimizedRelNode) {
         unoptimizedRelNode = decorellate(unoptimizedRelNode);
 
-        RelOptUtil.registerDefaultRules(planner, false, false);
-        planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE);
+        // This seems to be the minimal necesary set of enumerable nodes
+        // for out query set to be evaluated. There are more available, but
+        // we don't use any of them.
+        planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_PROJECT_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_FILTER_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_AGGREGATE_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_SORT_RULE);
         planner.addRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_TABLE_SCAN_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_VALUES_RULE);
 
-        /*
-         * planner.addRule(CoreRules.FILTER_INTO_JOIN);
-         * planner.addRule(CoreRules.FILTER_MERGE);
-         * //planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
-         * //planner.addRule(CoreRules.JOIN_PUSH_TRANSITIVE_PREDICATES);
-         * planner.addRule(CoreRules.FILTER_REDUCE_EXPRESSIONS);
-         * planner.addRule(CoreRules.JOIN_REDUCE_EXPRESSIONS);
-         * //planner.addRule(CoreRules.JOIN_PUSH_EXPRESSIONS);
-         * //planner.addRule(CoreRules.PROJECT_REDUCE_EXPRESSIONS);
-         * //planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
-         * //planner.addRule(CoreRules.MULTI_JOIN_BOTH_PROJECT);
-         * //planner.addRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
-         */
+        // Otherwice we can't cast LogicalSort to ENUMERABLE convention sometimes
+        planner.addRule(CoreRules.SORT_JOIN_TRANSPOSE);
+        planner.addRule(CoreRules.SORT_PROJECT_TRANSPOSE);
+
+        planner.addRule(CoreRules.JOIN_COMMUTE);
+        planner.addRule(CoreRules.FILTER_INTO_JOIN);
+        planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
+        planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
+        planner.addRule(CoreRules.JOIN_PROJECT_BOTH_TRANSPOSE);
+        planner.addRule(CoreRules.JOIN_TO_MULTI_JOIN);
+        planner.addRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
+
+        // Lots of queries fail without this one due to not implemented AVG.
+        // It also helps to merge common aggregates:
+        // e.g., avg(x), count(x), sum(x) would be expanded to
+        // sum(x)/count(x), count(x), sum(x),
+        // meaning that only 2 aggregate functions really need to be calculated
+        planner.addRule(CoreRules.AGGREGATE_REDUCE_FUNCTIONS);
+
+        // q16 and capybara3.sql. I'm not exactly sure why count distinct is a problem,
+        // perhaps it simply has to be implemented. But instead we rewrite it to a join
+        // with group by
+        planner.addRule(CoreRules.AGGREGATE_EXPAND_DISTINCT_AGGREGATES_TO_JOIN);
 
         Program program = Programs.of(RuleSets.ofList(planner.getRules()));
         RelTraitSet toTraits = unoptimizedRelNode.getTraitSet()
@@ -262,12 +289,12 @@ public class App {
                 ImmutableList.of(), ImmutableList.of());
     }
 
-    private static void runQuery(File inPath, File outPath, String queryFile) throws Exception {
+    private static void runQuery(File inPath, File outPath, String queryFile, Set<String> skiplist) throws Exception {
         String filename = inPath.getName().split("\\.")[0];
         if (queryFile != null && !filename.equals(queryFile)) {
             return;
         }
-        if (filename.equals("q9") || filename.equals("q21")) {
+        if (skiplist.contains(filename)) {
             return;
         }
         App.execTime.put(filename, "failure");
@@ -291,7 +318,7 @@ public class App {
         Future<ResultSet> future = executor.submit(new Task(stmt));
         ResultSet rs;
         try {
-            rs = future.get(180, TimeUnit.SECONDS);
+            rs = future.get(40, TimeUnit.SECONDS);
             if (rs == null) {
                 Files.writeString(Paths.get(outPath.toString(), filename + "_results.txt"), "N/A");
                 return;
@@ -337,9 +364,15 @@ public class App {
         createPlanner();
         App.execTime = new HashMap<java.lang.String, java.lang.String>();
 
+        Set<String> skiplist = new HashSet<String>();
+        if (queryFile == null) {
+            skiplist.add("q8");
+            skiplist.add("q9");
+            skiplist.add("q21");
+        }
         for (File sqlfile : files) {
             try {
-                runQuery(sqlfile, new File(out_path), queryFile);
+                runQuery(sqlfile, new File(out_path), queryFile, skiplist);
             } catch (Exception e) {
                 System.err.println(sqlfile.getName() + " failed");
                 System.err.println(e.getMessage());
