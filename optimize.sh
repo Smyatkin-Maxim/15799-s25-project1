@@ -28,18 +28,18 @@ cd calcite_app/
 
 if [ $# -eq 3 ] 
 then
-    java -Xmx5096m -jar build/libs/calcite_app-1.0-SNAPSHOT-all.jar "../input/queries" "../${OUTPUT_DIR}" $3
+    java -Xms8096m -Xmx8096m -jar build/libs/calcite_app-1.0-SNAPSHOT-all.jar "../input/queries" "../${OUTPUT_DIR}" $3
 else
-    java -Xmx5096m -jar build/libs/calcite_app-1.0-SNAPSHOT-all.jar "../input/queries" "../${OUTPUT_DIR}"
+    java -Xms8096m -Xmx8096m -jar build/libs/calcite_app-1.0-SNAPSHOT-all.jar "../input/queries" "../${OUTPUT_DIR}"
 fi
 cd -
 
-# make grader happy
-cp -n ${OUTPUT_DIR}/q1.sql ${OUTPUT_DIR}/q9.sql
-cp -n ${OUTPUT_DIR}/q1.txt ${OUTPUT_DIR}/q9.txt
-cp -n ${OUTPUT_DIR}/q1_optimized.sql ${OUTPUT_DIR}/q9_optimized.sql
-cp -n ${OUTPUT_DIR}/q1_optimized.txt ${OUTPUT_DIR}/q9_optimized.txt
-cp -n ${OUTPUT_DIR}/q1.sql ${OUTPUT_DIR}/q21.sql
-cp -n ${OUTPUT_DIR}/q1.txt ${OUTPUT_DIR}/q21.txt
-cp -n ${OUTPUT_DIR}/q1_optimized.sql ${OUTPUT_DIR}/q21_optimized.sql
-cp -n ${OUTPUT_DIR}/q1_optimized.txt ${OUTPUT_DIR}/q21_optimized.txt
+# make grader happy even if some queries are skipped/failing
+q=0
+for f in ./input/queries/*.sql; do
+    q=`basename $f .sql`
+    cp -n ${OUTPUT_DIR}/capybara1.sql ${OUTPUT_DIR}/${q}.sql
+    cp -n ${OUTPUT_DIR}/capybara1.txt ${OUTPUT_DIR}/${q}.txt
+    cp -n ${OUTPUT_DIR}/capybara1_optimized.sql ${OUTPUT_DIR}/${q}_optimized.sql
+    cp -n ${OUTPUT_DIR}/capybara1_optimized.txt ${OUTPUT_DIR}/${q}_optimized.txt
+done

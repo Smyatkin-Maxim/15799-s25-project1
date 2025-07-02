@@ -5,6 +5,7 @@ SOURCE_DIR = .
 all: submit
 
 submit:
+	sed -i 's/8096/4096/g' optimize.sh
 	rm -rf $(ZIP_TMP_DIR)
 	rm -f $(ZIP_FILE)
 	rsync -av --exclude-from=$(SOURCE_DIR)/.gitignore --exclude-from=$(SOURCE_DIR)/calcite_app/.gitignore --exclude '.git' $(SOURCE_DIR)/ $(ZIP_TMP_DIR)
@@ -12,6 +13,7 @@ submit:
 	cd $(ZIP_TMP_DIR) && zip -r $(ZIP_FILE) .
 	mv $(ZIP_TMP_DIR)/$(ZIP_FILE) $(ZIP_FILE)
 	rm -rf $(ZIP_TMP_DIR)
+	sed -i 's/4096/8096/g' optimize.sh
 
 clean:
 	rm -f $(ZIP_FILE)
