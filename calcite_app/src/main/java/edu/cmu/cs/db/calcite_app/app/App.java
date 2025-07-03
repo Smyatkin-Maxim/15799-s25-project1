@@ -85,21 +85,35 @@ import org.apache.calcite.tools.RuleSets;
 import com.google.common.collect.ImmutableList;
 
 public class App {
-    static class Task implements Callable<ResultSet> {
+    static class QueryWithTimeout implements Callable<ResultSet> {
         private PreparedStatement stmt;
 
-        Task(PreparedStatement stmt) {
+        QueryWithTimeout(PreparedStatement stmt) {
             this.stmt = stmt;
         }
 
         @Override
-        public ResultSet call() {
-            try {
-                return stmt.executeQuery();
-            } catch (Exception e) {
-                System.err.println(e.getMessage());
-                return null;
-            }
+        public ResultSet call() throws Exception {
+            return stmt.executeQuery();
+        }
+    }
+
+    static class OptimizeWithTimeout implements Callable<RelNode> {
+        private VolcanoPlanner p;
+        private RelNode unoptimized;
+
+        OptimizeWithTimeout(VolcanoPlanner planner, RelNode unoptimized) {
+            this.p = planner;
+            this.unoptimized = unoptimized;
+        }
+
+        @Override
+        public RelNode call() {
+            Program program = Programs.of(RuleSets.ofList(p.getRules()));
+            RelTraitSet toTraits = unoptimized.getTraitSet()
+                    .replace(EnumerableConvention.INSTANCE);
+            return program.run(p, unoptimized, toTraits,
+                    ImmutableList.of(), ImmutableList.of());
         }
     }
 
@@ -240,7 +254,7 @@ public class App {
         return RelDecorrelator.decorrelateQuery(corellated);
     }
 
-    private static RelNode optimize(RelNode unoptimizedRelNode) {
+    private static RelNode optimize(RelNode unoptimizedRelNode) throws Exception {
         unoptimizedRelNode = decorellate(unoptimizedRelNode);
 
         // This seems to be the minimal necesary set of enumerable nodes
@@ -267,8 +281,8 @@ public class App {
         planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
         planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
         planner.addRule(CoreRules.JOIN_PROJECT_BOTH_TRANSPOSE);
-        planner.addRule(CoreRules.JOIN_TO_MULTI_JOIN);
-        planner.addRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
+        planner.removeRule(CoreRules.JOIN_TO_MULTI_JOIN);
+        planner.removeRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
 
         // Lots of queries fail without this one due to not implemented AVG.
         // It also helps to merge common aggregates:
@@ -282,6 +296,28 @@ public class App {
         // with group by
         planner.addRule(CoreRules.AGGREGATE_EXPAND_DISTINCT_AGGREGATES_TO_JOIN);
 
+        // Let's try with bushy joins first. They often give produce good plans,
+        // but search space gets way too big sometimes, as I understand
+        // q5, q9, q21 stop giving OOM/TO
+        planner.addRule(CoreRules.JOIN_TO_MULTI_JOIN);
+        planner.addRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<RelNode> future = executor.submit(new OptimizeWithTimeout(planner, unoptimizedRelNode));
+        executor.shutdown();
+        try {
+            return future.get(20, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            System.out.println("No bushy joins due to timeout");
+        } finally {
+            executor.shutdownNow();
+            executor.awaitTermination(10, TimeUnit.SECONDS);
+        }
+
+        // Now try a smaller search space
+        planner.removeRule(CoreRules.JOIN_TO_MULTI_JOIN);
+        planner.removeRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
         Program program = Programs.of(RuleSets.ofList(planner.getRules()));
         RelTraitSet toTraits = unoptimizedRelNode.getTraitSet()
                 .replace(EnumerableConvention.INSTANCE);
@@ -315,23 +351,24 @@ public class App {
         Files.writeString(Paths.get(outPath.toString(), filename + "_optimized.sql"),
                 optimizedSqlNode.toSqlString(DatabaseProduct.DUCKDB.getDialect()).toString());
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        Future<ResultSet> future = executor.submit(new Task(stmt));
+        Future<ResultSet> future = executor.submit(new QueryWithTimeout(stmt));
+        executor.shutdownNow();
         ResultSet rs;
         try {
             rs = future.get(40, TimeUnit.SECONDS);
-            if (rs == null) {
-                Files.writeString(Paths.get(outPath.toString(), filename + "_results.txt"), "N/A");
-                return;
-            }
             String execTime = new Double(System.currentTimeMillis() - start).toString();
             App.execTime.put(filename, execTime + " ms");
             System.out.println(filename + " finished successfully in " + execTime + " ms");
-            SerializeResultSet(rs, Paths.get(outPath.toString(), filename + "_results.txt").toFile());
+            SerializeResultSet(rs, Paths.get(outPath.toString(), filename + "_results.csv").toFile());
         } catch (TimeoutException e) {
             future.cancel(true);
             App.execTime.put(filename, "timeout");
+        } catch (Exception e) {
+            Files.writeString(Paths.get(outPath.toString(), filename + "_results.csv"), e.getMessage());
+            throw e;
         } finally {
             executor.shutdownNow();
+            executor.awaitTermination(10, TimeUnit.SECONDS);
         }
     }
 
@@ -366,9 +403,8 @@ public class App {
 
         Set<String> skiplist = new HashSet<String>();
         if (queryFile == null) {
-            skiplist.add("q8");
-            skiplist.add("q9");
-            skiplist.add("q21");
+            //skiplist.add("q9");
+            //skiplist.add("q21");
         }
         for (File sqlfile : files) {
             try {

@@ -26,8 +26,7 @@
 - After spending a while trying to figure out a proper way to fix OOMs in q9 and q21 I've decided to ditch it for now and try to submit the little that I have to gradescope. There was some struggle with gradescope as it had some expectations for java heap size, lack of missing files even if a query failed and some other staff. But I finally got my submission graded, for ~60.
 - It turns out you can take a look at "reference solution"`s optimized plans and see what you miss.
 - I still couldn't get any more optimizations after two evenings of struggle. I believe the biggest problem is that I took default preset of Calcite rules and try to play around it. It's a good starting point **BUT** it's hard to improve on it cuz you cannot possibly keep all the 100+ rules from the preset and thoughtfully improve on it.  
-So I've decided to take a step back and start thoughtfully from the most nominalistic rule-set. 
-
-**Conclusions**
-
-TODO
+So I've decided to take a step back and start thoughtfully from the most nominalistic rule-set. Got score from ~60 to ~40
+- Couldn't understand why my score was 0 for some tasks, so I've just downloaded grader.py. Turns out it gives 0 score if resulsts in Calcite don't match. And what a surprise - reference solution fails to convert sql.Date to LocalDate and gives exception for half of the tasks. So my solution is also expected to give an exception. However, turns out that it's smart enough to ignore this exception, I was just sloppy and created qX_results**.txt** instead of **.csv**. After changing to csv I've got my score up.
+- I also noticed that bushy joins give very good plans sometimes. However, they significantly increase the search space. So, I've added an optimization task with bushy joins **and with timeout**. If it fails, I do a simpler join optimization. Now q9 and q21 pass and my score is ~93.
+- 
