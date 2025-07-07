@@ -4,6 +4,9 @@
 # Log file
 *.log
 
+# local scores report
+*scores.txt
+
 # BlueJ files
 *.ctxt
 

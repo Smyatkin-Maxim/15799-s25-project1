@@ -13,9 +13,11 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
@@ -124,7 +126,7 @@ public class App {
     private static VolcanoPlanner planner;
     private static CalciteConnectionConfig connConfig;
     private static Prepare.CatalogReader catalogReader;
-    private static Map<String, String> execTime;
+    private static Map<String, List<Double>> execTime;
 
     private static void SerializePlan(RelNode relNode, File outputPath) throws IOException {
         Files.writeString(outputPath.toPath(),
@@ -158,6 +160,18 @@ public class App {
             resultSetString.append("\n");
         }
         Files.writeString(outputPath.toPath(), resultSetString.toString());
+    }
+
+    private static void WritePerformanceReport(File outputPath) throws Exception {
+        StringBuilder performanceString = new StringBuilder();
+        for (String q : execTime.keySet()) {
+            Double sum = 0.0;
+            for (Double val : execTime.get(q)) {
+                sum += val;
+            }
+            performanceString.append(q + " " + ((Double)(sum/execTime.get(q).size())).toString() + "\n");
+        }
+        Files.writeString(outputPath.toPath(), performanceString.toString());
     }
 
     private static void createSchema() throws Exception {
@@ -267,16 +281,13 @@ public class App {
         planner.addRule(EnumerableRules.ENUMERABLE_SORT_RULE);
         planner.addRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
         planner.addRule(EnumerableRules.ENUMERABLE_TABLE_SCAN_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
         planner.addRule(EnumerableRules.ENUMERABLE_VALUES_RULE);
 
         // Otherwice we can't cast LogicalSort to ENUMERABLE convention sometimes
         planner.addRule(CoreRules.SORT_JOIN_TRANSPOSE);
         planner.addRule(CoreRules.SORT_PROJECT_TRANSPOSE);
 
-        planner.addRule(CoreRules.JOIN_COMMUTE);
+        planner.addRule(CoreRules.JOIN_COMMUTE.config.withAllowAlwaysTrueCondition(false).toRule());
         planner.addRule(CoreRules.FILTER_INTO_JOIN);
         planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
         planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
@@ -333,7 +344,7 @@ public class App {
         if (skiplist.contains(filename)) {
             return;
         }
-        App.execTime.put(filename, "failure");
+        App.execTime.putIfAbsent(filename, new ArrayList<Double>());
         System.out.println("Trying " + filename);
         String rawQuery = String.join("\n", Files.readAllLines(inPath.toPath()));
         Files.writeString(Paths.get(outPath.toString(), inPath.getName()), rawQuery);
@@ -357,14 +368,15 @@ public class App {
         try {
             rs = future.get(40, TimeUnit.SECONDS);
             String execTime = new Double(System.currentTimeMillis() - start).toString();
-            App.execTime.put(filename, execTime + " ms");
+            App.execTime.get(filename).add(new Double(execTime));
             System.out.println(filename + " finished successfully in " + execTime + " ms");
             SerializeResultSet(rs, Paths.get(outPath.toString(), filename + "_results.csv").toFile());
         } catch (TimeoutException e) {
             future.cancel(true);
-            App.execTime.put(filename, "timeout");
+            App.execTime.get(filename).add(new Double(99999));
         } catch (Exception e) {
             Files.writeString(Paths.get(outPath.toString(), filename + "_results.csv"), e.getMessage());
+            App.execTime.get(filename).add(new Double(99999));
             throw e;
         } finally {
             executor.shutdownNow();
@@ -399,21 +411,25 @@ public class App {
         createSchema();
         createValidator();
         createPlanner();
-        App.execTime = new HashMap<java.lang.String, java.lang.String>();
+        App.execTime = new HashMap<java.lang.String, List<Double>>();
 
         Set<String> skiplist = new HashSet<String>();
         if (queryFile == null) {
-            //skiplist.add("q9");
-            //skiplist.add("q21");
+            // skiplist.add("q9");
+            // skiplist.add("q21");
         }
-        for (File sqlfile : files) {
-            try {
-                runQuery(sqlfile, new File(out_path), queryFile, skiplist);
-            } catch (Exception e) {
-                System.err.println(sqlfile.getName() + " failed");
-                System.err.println(e.getMessage());
+        int n_runs = 5;
+        for (int i = 0; i < n_runs; ++i) {
+            for (File sqlfile : files) {
+                try {
+                    runQuery(sqlfile, new File(out_path), queryFile, skiplist);
+                } catch (Exception e) {
+                    System.err.println(sqlfile.getName() + " failed");
+                    System.err.println(e.getMessage());
+                }
             }
         }
         execTime.forEach((key, value) -> System.out.println(key + " " + value));
+        WritePerformanceReport(new File("../scores.txt"));
     }
 }

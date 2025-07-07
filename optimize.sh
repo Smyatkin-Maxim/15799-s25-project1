@@ -20,6 +20,8 @@ tar xzf "${WORKLOAD}" --directory input/
 rm -rf ./items.db
 ./duckdb "items.db" -c "IMPORT DATABASE './input/data/';"
 
+[ -f scores.txt ] && mv scores.txt old_scores.txt
+
 # Build and run the Calcite app.
 cd calcite_app/
 ./gradlew build
