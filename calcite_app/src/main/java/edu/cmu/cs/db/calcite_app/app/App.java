@@ -128,6 +128,17 @@ public class App {
     private static Prepare.CatalogReader catalogReader;
     private static Map<String, List<Double>> execTime;
 
+    private static void AddEnumerableRules() {
+        planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_PROJECT_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_FILTER_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_AGGREGATE_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_SORT_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_TABLE_SCAN_RULE);
+        planner.addRule(EnumerableRules.ENUMERABLE_VALUES_RULE);
+    }
+
     private static void SerializePlan(RelNode relNode, File outputPath) throws IOException {
         Files.writeString(outputPath.toPath(),
                 RelOptUtil.dumpPlan("", relNode, SqlExplainFormat.TEXT, SqlExplainLevel.ALL_ATTRIBUTES));
@@ -169,7 +180,7 @@ public class App {
             for (Double val : execTime.get(q)) {
                 sum += val;
             }
-            performanceString.append(q + " " + ((Double)(sum/execTime.get(q).size())).toString() + "\n");
+            performanceString.append(q + " " + ((Double) (sum / execTime.get(q).size())).toString() + "\n");
         }
         Files.writeString(outputPath.toPath(), performanceString.toString());
     }
@@ -271,29 +282,34 @@ public class App {
     private static RelNode optimize(RelNode unoptimizedRelNode) throws Exception {
         unoptimizedRelNode = decorellate(unoptimizedRelNode);
 
-        // This seems to be the minimal necesary set of enumerable nodes
-        // for out query set to be evaluated. There are more available, but
-        // we don't use any of them.
-        planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_PROJECT_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_FILTER_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_AGGREGATE_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_SORT_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_LIMIT_SORT_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_TABLE_SCAN_RULE);
-        planner.addRule(EnumerableRules.ENUMERABLE_VALUES_RULE);
+        planner.clear();
+        AddEnumerableRules();
 
         // Otherwice we can't cast LogicalSort to ENUMERABLE convention sometimes
         planner.addRule(CoreRules.SORT_JOIN_TRANSPOSE);
         planner.addRule(CoreRules.SORT_PROJECT_TRANSPOSE);
 
-        planner.addRule(CoreRules.JOIN_COMMUTE.config.withAllowAlwaysTrueCondition(false).toRule());
+        // For whatever reason (perhaps, cardinality misestimates) Calcite likes to pick
+        // poor plans with cartesian product. So I turn them off here
+        planner.addRule(CoreRules.JOIN_COMMUTE.config
+                .withAllowAlwaysTrueCondition(false)
+                .withSwapOuter(true)
+                .toRule());
+        planner.addRule(CoreRules.JOIN_ASSOCIATE.config
+                .withAllowAlwaysTrueCondition(false)
+                .toRule());
+
         planner.addRule(CoreRules.FILTER_INTO_JOIN);
         planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
         planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
-        planner.addRule(CoreRules.JOIN_PROJECT_BOTH_TRANSPOSE);
-        planner.removeRule(CoreRules.JOIN_TO_MULTI_JOIN);
-        planner.removeRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
+        // planner.addRule(CoreRules.JOIN_PROJECT_BOTH_TRANSPOSE);
+
+        // Still need these rules to have a flexible set of rules,
+        // but now they are cost-based
+        planner.addRule(CoreRules.FILTER_AGGREGATE_TRANSPOSE);
+        planner.addRule(CoreRules.FILTER_PROJECT_TRANSPOSE);
+        planner.addRule(CoreRules.PROJECT_JOIN_TRANSPOSE);
+        planner.addRule(CoreRules.PROJECT_AGGREGATE_MERGE);
 
         // Lots of queries fail without this one due to not implemented AVG.
         // It also helps to merge common aggregates:
@@ -309,7 +325,7 @@ public class App {
 
         // Let's try with bushy joins first. They often give produce good plans,
         // but search space gets way too big sometimes, as I understand
-        // q5, q9, q21 stop giving OOM/TO
+        // q11, q2, q7 and q21 get good performance boosts
         planner.addRule(CoreRules.JOIN_TO_MULTI_JOIN);
         planner.addRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
 
@@ -327,7 +343,7 @@ public class App {
         }
 
         // Now try a smaller search space
-        planner.removeRule(CoreRules.JOIN_TO_MULTI_JOIN);
+        // planner.removeRule(CoreRules.JOIN_TO_MULTI_JOIN);
         planner.removeRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
         Program program = Programs.of(RuleSets.ofList(planner.getRules()));
         RelTraitSet toTraits = unoptimizedRelNode.getTraitSet()
@@ -355,6 +371,10 @@ public class App {
         RelNode optimized = optimize(relNode);
         SerializePlan(optimized, Paths.get(outPath.toString(), filename + "_optimized.txt").toFile());
         RelRunner runner = conn.unwrap(RelRunner.class);
+
+        planner.clear();
+        AddEnumerableRules();
+
         PreparedStatement stmt = runner.prepareStatement(optimized);
         long start = System.currentTimeMillis();
         SqlNode optimizedSqlNode = new RelToSqlConverter(
@@ -366,7 +386,7 @@ public class App {
         executor.shutdownNow();
         ResultSet rs;
         try {
-            rs = future.get(40, TimeUnit.SECONDS);
+            rs = future.get(120, TimeUnit.SECONDS);
             String execTime = new Double(System.currentTimeMillis() - start).toString();
             App.execTime.get(filename).add(new Double(execTime));
             System.out.println(filename + " finished successfully in " + execTime + " ms");
@@ -415,8 +435,7 @@ public class App {
 
         Set<String> skiplist = new HashSet<String>();
         if (queryFile == null) {
-            // skiplist.add("q9");
-            // skiplist.add("q21");
+            // skiplist.add("q13");
         }
         int n_runs = 5;
         for (int i = 0; i < n_runs; ++i) {
