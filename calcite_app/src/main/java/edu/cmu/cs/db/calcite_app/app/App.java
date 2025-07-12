@@ -285,10 +285,6 @@ public class App {
         planner.clear();
         AddEnumerableRules();
 
-        // Otherwice we can't cast LogicalSort to ENUMERABLE convention sometimes
-        planner.addRule(CoreRules.SORT_JOIN_TRANSPOSE);
-        planner.addRule(CoreRules.SORT_PROJECT_TRANSPOSE);
-
         // For whatever reason (perhaps, cardinality misestimates) Calcite likes to pick
         // poor plans with cartesian product. So I turn them off here
         planner.addRule(CoreRules.JOIN_COMMUTE.config
@@ -322,12 +318,6 @@ public class App {
         // perhaps it simply has to be implemented. But instead we rewrite it to a join
         // with group by
         planner.addRule(CoreRules.AGGREGATE_EXPAND_DISTINCT_AGGREGATES_TO_JOIN);
-
-        // Let's try with bushy joins first. They often give produce good plans,
-        // but search space gets way too big sometimes, as I understand
-        // q11, q2, q7 and q21 get good performance boosts
-        planner.addRule(CoreRules.JOIN_TO_MULTI_JOIN);
-        planner.addRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         Future<RelNode> future = executor.submit(new OptimizeWithTimeout(planner, unoptimizedRelNode));
