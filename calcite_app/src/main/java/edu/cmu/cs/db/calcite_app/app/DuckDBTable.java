@@ -92,13 +92,11 @@ public class DuckDBTable extends AbstractTable
         final List<ImmutableBitSet> keys = new ArrayList<>();
         // NOTE: was hoping that Calcite can use this information for better plans
         // but instead it generates bogus SQL, at least in duckdb opinion
-        /*
-         * for (Column c : columns) {
-         * if (c.unique) {
-         * keys.add(ImmutableBitSet.of(c.id));
-         * }
-         * }
-         */
+        for (Column c : columns) {
+            if (c.unique) {
+                keys.add(ImmutableBitSet.of(c.id));
+            }
+        }
         return Statistics.of(cardinality(), keys, new ArrayList<>());
     }
 
@@ -132,14 +130,12 @@ public class DuckDBTable extends AbstractTable
     }
 
     private int nDistinct(String column) throws Exception {
-        /*
-         * ResultSet rs = conn.prepareStatement("select count(distinct \"" + column +
-         * "\") from \"" + name + "\"")
-         * .executeQuery();
-         * rs.next();
-         * return rs.getInt(1);
-         */
-        return 1;
+
+        ResultSet rs = conn.prepareStatement("select count(distinct \"" + column +
+                "\") from \"" + name + "\"")
+                .executeQuery();
+        rs.next();
+        return rs.getInt(1);
     }
 
     private Object[][] materialize() throws Exception {

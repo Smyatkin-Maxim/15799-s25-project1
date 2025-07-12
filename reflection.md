@@ -35,4 +35,4 @@ So I've decided to take a step back and start thoughtfully from the most nominal
 - Seems like multi join plans (including bushy joins) are optimized more heuristically than based on costs. Sometimes I get really bad plans (q9 for example). With somewhat random rule changes I've managed to get q9 working (due to timeout in bushy joins optimization)
 - TIMEOUT in the first round of optimizations allows me to try much wider search space: associativity, commutativity, bushy joins. Looks like it helps for some queries.
 - Removed bushy- and multi-joins: as this optimization is mostly heuristic it's hard to optimize further. I just can't control what rules are applied there base on costs and there are lots of Cartesian products. Removing bushy joins improved most of the queries (surprisingly it was the opposite before, when I had worse rules I suppose).
-- 
+- Turned on statistics on unique columns. Doesn't look to be making any difference, but perhaps I will be able to manually improve cost estimates using it
