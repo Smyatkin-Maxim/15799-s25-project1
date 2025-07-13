@@ -57,6 +57,7 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.externalize.RelWriterImpl;
 import org.apache.calcite.rel.rel2sql.RelToSqlConverter;
 import org.apache.calcite.rel.rules.CoreRules;
+import org.apache.calcite.rel.rules.JoinPushThroughJoinRule;
 import org.apache.calcite.rel.rules.PruneEmptyRules;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rex.RexBuilder;
@@ -265,11 +266,6 @@ public class App {
                                 CoreRules.FILTER_SUB_QUERY_TO_CORRELATE,
                                 CoreRules.PROJECT_SUB_QUERY_TO_CORRELATE,
                                 CoreRules.JOIN_SUB_QUERY_TO_CORRELATE,
-                                // plus FilterAggregateTransposeRule
-                                CoreRules.FILTER_AGGREGATE_TRANSPOSE,
-                                CoreRules.FILTER_PROJECT_TRANSPOSE,
-                                CoreRules.PROJECT_JOIN_TRANSPOSE,
-                                CoreRules.PROJECT_AGGREGATE_MERGE,
                                 // q19
                                 FilterPullFactorsRule.Config.DEFAULT.toRule()))
                 .build();
@@ -298,15 +294,30 @@ public class App {
         planner.addRule(CoreRules.FILTER_INTO_JOIN);
         planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
         planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
-        // planner.addRule(CoreRules.JOIN_PROJECT_BOTH_TRANSPOSE);
 
-        // Still need these rules to have a flexible set of rules,
-        // but now they are cost-based
+        // I thought it's the JOIN_ASSOCIATE`s rule to explore different
+        // join pushdowns/swaps, but it appears that I need these two rules
+        // to properly explore different join orders.
+        planner.addRule(JoinPushThroughJoinRule.RIGHT);
+        planner.addRule(JoinPushThroughJoinRule.LEFT);
+
         planner.addRule(CoreRules.FILTER_AGGREGATE_TRANSPOSE);
         planner.addRule(CoreRules.FILTER_PROJECT_TRANSPOSE);
         planner.addRule(CoreRules.PROJECT_JOIN_TRANSPOSE);
         planner.addRule(CoreRules.PROJECT_AGGREGATE_MERGE);
 
+        // This bunch of rules removes some rediculous stuff that never
+        // is supposed to be executed. Seems to be working only for cap1
+        // query and doesn't give any additional points, but nevertheless
+        // I'll keep it here
+        planner.addRule(PruneEmptyRules.PROJECT_INSTANCE);
+        planner.addRule(PruneEmptyRules.AGGREGATE_INSTANCE);
+        planner.addRule(PruneEmptyRules.EMPTY_TABLE_INSTANCE);
+        planner.addRule(PruneEmptyRules.FILTER_INSTANCE);
+        planner.addRule(PruneEmptyRules.JOIN_LEFT_INSTANCE);
+        planner.addRule(PruneEmptyRules.JOIN_RIGHT_INSTANCE);
+        planner.addRule(PruneEmptyRules.SORT_FETCH_ZERO_INSTANCE);
+        
         // Lots of queries fail without this one due to not implemented AVG.
         // It also helps to merge common aggregates:
         // e.g., avg(x), count(x), sum(x) would be expanded to
@@ -326,15 +337,14 @@ public class App {
             return future.get(20, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
-            System.out.println("No bushy joins due to timeout");
+            System.out.println("Full join ordering timed out. Trying a more narrow search");
         } finally {
             executor.shutdownNow();
             executor.awaitTermination(10, TimeUnit.SECONDS);
         }
 
         // Now try a smaller search space
-        // planner.removeRule(CoreRules.JOIN_TO_MULTI_JOIN);
-        planner.removeRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
+        planner.removeRule(CoreRules.JOIN_ASSOCIATE);
         Program program = Programs.of(RuleSets.ofList(planner.getRules()));
         RelTraitSet toTraits = unoptimizedRelNode.getTraitSet()
                 .replace(EnumerableConvention.INSTANCE);
