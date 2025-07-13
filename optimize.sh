@@ -9,6 +9,14 @@ echo "Invoking optimize.sh."
 echo -e "\tWorkload: ${WORKLOAD}"
 echo -e "\tOutput Dir: ${OUTPUT_DIR}"
 
+if [ -d $OUTPUT_DIR ]
+then
+    rm -rf ./old_plans
+    mkdir ./old_plans
+    cp -f ${OUTPUT_DIR}*_optimized.sql ./old_plans || echo "No plans"
+    cp -f ${OUTPUT_DIR}*_optimized.txt ./old_plans || echo "No plans"
+fi
+
 rm -rf $OUTPUT_DIR
 mkdir -p "${OUTPUT_DIR}"
 mkdir -p input/
