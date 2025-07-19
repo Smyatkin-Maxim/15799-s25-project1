@@ -38,4 +38,4 @@ So I've decided to take a step back and start thoughtfully from the most nominal
 - Turned on statistics on unique columns. Doesn't look to be making any difference, but perhaps I will be able to manually improve cost estimates using it
 - Things get much easier if you have a tool to compare with plans from previous run[s]
 - Better support for associativity. I thought that it will automatically push join through join, but you actually need a separate rule for that
-- 
+- Tried to convert join to semijoin for unique columns, but it generates bad SQL. Doesn't seem to be working

@@ -79,6 +79,7 @@ import org.apache.calcite.sql.validate.SqlValidatorUtil;
 import org.apache.calcite.sql2rel.RelDecorrelator;
 import org.apache.calcite.sql2rel.SqlToRelConverter;
 import org.apache.calcite.sql2rel.StandardConvertletTable;
+import org.apache.calcite.tools.Planner;
 import org.apache.calcite.tools.Program;
 import org.apache.calcite.tools.Programs;
 import org.apache.calcite.tools.RelRunner;
@@ -294,6 +295,8 @@ public class App {
         planner.addRule(CoreRules.FILTER_INTO_JOIN);
         planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
         planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
+        // q20, q17
+        planner.addRule(CoreRules.JOIN_DERIVE_IS_NOT_NULL_FILTER_RULE);
 
         // I thought it's the JOIN_ASSOCIATE`s rule to explore different
         // join pushdowns/swaps, but it appears that I need these two rules
@@ -317,7 +320,7 @@ public class App {
         planner.addRule(PruneEmptyRules.JOIN_LEFT_INSTANCE);
         planner.addRule(PruneEmptyRules.JOIN_RIGHT_INSTANCE);
         planner.addRule(PruneEmptyRules.SORT_FETCH_ZERO_INSTANCE);
-        
+
         // Lots of queries fail without this one due to not implemented AVG.
         // It also helps to merge common aggregates:
         // e.g., avg(x), count(x), sum(x) would be expanded to
