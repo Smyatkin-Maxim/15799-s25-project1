@@ -29,8 +29,8 @@ import org.apache.calcite.tools.RelBuilder;
 import org.immutables.value.Value;
 
 /**
- * Planner rule that combines two
- * {@link org.apache.calcite.rel.logical.LogicalFilter}s.
+ * Planner rule that pulls up common factors from conditions,
+ * e.g. (a and b) or (a and c) --> a and (b or c)
  */
 @Value.Enclosing
 public class FilterPullFactorsRule extends RelRule<FilterPullFactorsRule.Config>

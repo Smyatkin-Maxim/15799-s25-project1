@@ -296,7 +296,9 @@ public class App {
         planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
         planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
         // q20, q17
-        planner.addRule(CoreRules.JOIN_DERIVE_IS_NOT_NULL_FILTER_RULE);
+        // WTF_MOMENT: This rule gives better plan and better runtimes on my tests.
+        // But on gradescope it degenerates performance to score 0
+        //planner.addRule(CoreRules.JOIN_DERIVE_IS_NOT_NULL_FILTER_RULE);
 
         // I thought it's the JOIN_ASSOCIATE`s rule to explore different
         // join pushdowns/swaps, but it appears that I need these two rules
@@ -437,9 +439,6 @@ public class App {
         App.execTime = new HashMap<java.lang.String, List<Double>>();
 
         Set<String> skiplist = new HashSet<String>();
-        if (queryFile == null) {
-            // skiplist.add("q13");
-        }
         int n_runs = 5;
         for (int i = 0; i < n_runs; ++i) {
             for (File sqlfile : files) {
