@@ -235,7 +235,7 @@ public class App {
 
     private static void createPlanner() {
         App.planner = new VolcanoPlanner(
-                RelOptCostImpl.FACTORY,
+                null,
                 Contexts.of(connConfig));
         App.planner.addRelTraitDef(ConventionTraitDef.INSTANCE);
     }
@@ -268,7 +268,8 @@ public class App {
                                 CoreRules.PROJECT_SUB_QUERY_TO_CORRELATE,
                                 CoreRules.JOIN_SUB_QUERY_TO_CORRELATE,
                                 // q19
-                                FilterPullFactorsRule.Config.DEFAULT.toRule()))
+                                FilterPullFactorsRule.Config.DEFAULT.toRule()/*,
+                                FilterReorderRule.Config.DEFAULT.toRule()*/))
                 .build();
         Program program = Programs.of(hepProgram, true, cluster.getMetadataProvider());
         RelNode corellated = program.run(cluster.getPlanner(), original, cluster.traitSet(),
@@ -334,6 +335,9 @@ public class App {
         // perhaps it simply has to be implemented. But instead we rewrite it to a join
         // with group by
         planner.addRule(CoreRules.AGGREGATE_EXPAND_DISTINCT_AGGREGATES_TO_JOIN);
+
+        // evaluate the most promising conditions first
+        //planner.addRule(FilterReorderRule.Config.DEFAULT.toRule());
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         Future<RelNode> future = executor.submit(new OptimizeWithTimeout(planner, unoptimizedRelNode));
