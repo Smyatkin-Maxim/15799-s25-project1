@@ -39,3 +39,5 @@ So I've decided to take a step back and start thoughtfully from the most nominal
 - Things get much easier if you have a tool to compare with plans from previous run[s]
 - Better support for associativity. I thought that it will automatically push join through join, but you actually need a separate rule for that
 - Tried to convert join to semijoin for unique columns, but it generates bad SQL. Doesn't seem to be working
+- Somewhat unnoticed to me was the fact that there are two costing implementations in Calcite: VolcanoCost (CPU, ROWS, IO) and RelOptsCostImpl (simpler single-value cost). I've used the second one while it turns out that VolcanoCost is the main costing algorithm. After switching to it I got somewhat better results. However even VolcanoCost still looks awfully bad.
+- I tried reordering Filter conditions by their selectivity (or by their cost * selectivity, whatever). But to make it work I need it to be a cost-based rule. Which turns out a lot of work. Ditching this idea at least for now.
