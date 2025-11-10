@@ -129,6 +129,8 @@ public class App {
     private static CalciteConnectionConfig connConfig;
     private static Prepare.CatalogReader catalogReader;
     private static Map<String, List<Double>> execTime;
+    private static Connection duckConn;
+    private static Boolean runInDuck;
 
     private static void AddEnumerableRules() {
         planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
@@ -192,7 +194,12 @@ public class App {
         info.setProperty(CalciteConnectionProperty.CASE_SENSITIVE.camelName(), "false");
         conn = DriverManager.getConnection("jdbc:calcite:", info).unwrap(CalciteConnection.class);
         App.schema = conn.getRootSchema();
-        conn.getRootSchema().add("main", new DuckDBSchema());
+        runInDuck = false;
+        Class.forName("org.duckdb.DuckDBDriver");
+        Properties ro_prop = new Properties();
+        ro_prop.setProperty("duckdb.read_only", "true");
+        duckConn = DriverManager.getConnection("jdbc:duckdb:../items.db", ro_prop);
+        conn.getRootSchema().add("main", new DuckDBSchema(duckConn));
     }
 
     private static SqlNode parseSql(String sql) throws Exception {
@@ -361,6 +368,27 @@ public class App {
                 ImmutableList.of(), ImmutableList.of());
     }
 
+    private static ResultSet executeDuckDBQuery(String query) throws Exception {
+        return duckConn.createStatement().executeQuery(query);
+    }
+
+    private static ResultSet executeCalciteQuery(RelNode optimized) throws Exception {
+        RelRunner runner = conn.unwrap(RelRunner.class);
+        PreparedStatement stmt = runner.prepareStatement(optimized);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<ResultSet> future = executor.submit(new QueryWithTimeout(stmt));
+        executor.shutdownNow();
+        try {
+            return future.get(120, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            throw e;
+        } finally {
+            executor.shutdownNow();
+            executor.awaitTermination(10, TimeUnit.SECONDS);
+        }
+    }
+
     private static void runQuery(File inPath, File outPath, String queryFile, Set<String> skiplist) throws Exception {
         String filename = inPath.getName().split("\\.")[0];
         if (queryFile != null && !filename.equals(queryFile)) {
@@ -378,38 +406,30 @@ public class App {
         RelNode relNode = convertToRel(validated);
         SerializePlan(relNode, Paths.get(outPath.toString(), filename + ".txt").toFile());
         RelNode optimized = optimize(relNode);
-        SerializePlan(optimized, Paths.get(outPath.toString(), filename + "_optimized.txt").toFile());
-        RelRunner runner = conn.unwrap(RelRunner.class);
+        SerializePlan(optimized, Paths.get(outPath.toString(), filename + "_optimized.txt").toFile());        
 
         planner.clear();
         AddEnumerableRules();
 
-        PreparedStatement stmt = runner.prepareStatement(optimized);
-        long start = System.currentTimeMillis();
         SqlNode optimizedSqlNode = new RelToSqlConverter(
                 DatabaseProduct.DUCKDB.getDialect()).visitRoot(optimized).asStatement();
-        Files.writeString(Paths.get(outPath.toString(), filename + "_optimized.sql"),
-                optimizedSqlNode.toSqlString(DatabaseProduct.DUCKDB.getDialect()).toString());
-        ExecutorService executor = Executors.newSingleThreadExecutor();
-        Future<ResultSet> future = executor.submit(new QueryWithTimeout(stmt));
-        executor.shutdownNow();
-        ResultSet rs;
+        String optimizedQueryText = optimizedSqlNode.toSqlString(DatabaseProduct.DUCKDB.getDialect()).toString();
+        Files.writeString(Paths.get(outPath.toString(), filename + "_optimized.sql"), optimizedQueryText);
+
+        long start = System.currentTimeMillis();
+        
         try {
-            rs = future.get(120, TimeUnit.SECONDS);
+            ResultSet rs = runInDuck ? executeDuckDBQuery(optimizedQueryText) : executeCalciteQuery(optimized);
             String execTime = new Double(System.currentTimeMillis() - start).toString();
             App.execTime.get(filename).add(new Double(execTime));
             System.out.println(filename + " finished successfully in " + execTime + " ms");
             SerializeResultSet(rs, Paths.get(outPath.toString(), filename + "_results.csv").toFile());
         } catch (TimeoutException e) {
-            future.cancel(true);
             App.execTime.get(filename).add(new Double(99999));
         } catch (Exception e) {
             Files.writeString(Paths.get(outPath.toString(), filename + "_results.csv"), e.getMessage());
             App.execTime.get(filename).add(new Double(99999));
             throw e;
-        } finally {
-            executor.shutdownNow();
-            executor.awaitTermination(10, TimeUnit.SECONDS);
         }
     }
 
@@ -444,6 +464,7 @@ public class App {
 
         Set<String> skiplist = new HashSet<String>();
         int n_runs = 5;
+        duckConn.createStatement().execute("PRAGMA disable_optimizer;");
         for (int i = 0; i < n_runs; ++i) {
             for (File sqlfile : files) {
                 try {

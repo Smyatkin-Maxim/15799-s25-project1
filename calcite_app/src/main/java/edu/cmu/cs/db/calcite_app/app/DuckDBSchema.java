@@ -6,6 +6,7 @@ import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 
 import javax.annotation.Nullable;
 
@@ -16,9 +17,11 @@ import com.google.common.collect.ImmutableMap;
 
 public class DuckDBSchema extends AbstractSchema {
     private @Nullable Map<String, Table> tableMap;
+    private Connection conn;
 
-    public DuckDBSchema() throws Exception {
+    public DuckDBSchema(Connection conn) throws Exception {
         super();
+        this.conn = conn;
         tableMap = createTableMap();
     }
 
@@ -36,13 +39,10 @@ public class DuckDBSchema extends AbstractSchema {
 
     private Map<String, Table> createTableMap() throws Exception {
         final ImmutableMap.Builder<String, Table> builder = ImmutableMap.builder();
-        Class.forName("org.duckdb.DuckDBDriver");
-        Connection conn = DriverManager.getConnection("jdbc:duckdb:../items.db");
         for (String tableName : getTableNames(conn)) {
             Table table = new DuckDBTable(conn, tableName);
             builder.put(tableName, table);
         }
-        conn.close();
         return builder.build();
     }
 
