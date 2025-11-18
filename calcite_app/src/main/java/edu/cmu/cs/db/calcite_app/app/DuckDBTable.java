@@ -5,19 +5,14 @@ import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 import org.apache.calcite.DataContext;
 import org.apache.calcite.linq4j.Enumerable;
-import org.apache.calcite.linq4j.Enumerator;
 import org.apache.calcite.linq4j.Linq4j;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
-import org.apache.calcite.rex.RexNode;
-import org.apache.calcite.runtime.SqlFunctions;
-import org.apache.calcite.schema.ProjectableFilterableTable;
 import org.apache.calcite.schema.ScannableTable;
 import org.apache.calcite.schema.Statistic;
 import org.apache.calcite.schema.Statistics;
@@ -28,20 +23,22 @@ import org.apache.calcite.util.Pair;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class DuckDBTable extends AbstractTable
-        implements ScannableTable/* , ProjectableFilterableTable */ {
+        implements ScannableTable {
 
     public class Column {
         public String name;
         public int type;
         public String typeName;
         public boolean unique;
+        public int ndv;
         public int id;
 
-        Column(String name, int type, String typeName, boolean unique, int id) {
+        Column(String name, int type, String typeName, boolean unique, int ndv, int id) {
             this.name = name;
             this.type = type;
             this.typeName = typeName;
             this.unique = unique;
+            this.ndv = ndv;
             this.id = id;
         }
     }
@@ -79,14 +76,6 @@ public class DuckDBTable extends AbstractTable
         return Linq4j.asEnumerable(this.data);
     }
 
-    /*
-     * @Override
-     * public Enumerable<@Nullable Object[]> scan(DataContext root, List<RexNode>
-     * filters, int @Nullable [] projects) {
-     * return new DuckDBProjectableEnumerable(projects, data);
-     * }
-     */
-
     @Override
     public Statistic getStatistic() {
         final List<ImmutableBitSet> keys = new ArrayList<>();
@@ -105,10 +94,11 @@ public class DuckDBTable extends AbstractTable
             ResultSet rs = conn.getMetaData().getColumns(null, null, name, null);
             columns = new ArrayList<Column>();
             while (rs.next()) {
-                Boolean isUnique = nDistinct(rs.getString("COLUMN_NAME")) == cardinality();
+                int ndv = nDistinct(rs.getString("COLUMN_NAME"));
+                Boolean isUnique = ndv == cardinality();
                 columns.add(
                         new Column(rs.getString("COLUMN_NAME"), rs.getInt("DATA_TYPE"), rs.getString("TYPE_NAME"),
-                                isUnique, rs.getInt("ORDINAL_POSITION")));
+                                isUnique, ndv, rs.getInt("ORDINAL_POSITION")));
             }
             Collections.sort(columns, (c1, c2) -> c1.id - c2.id);
         }
@@ -130,7 +120,6 @@ public class DuckDBTable extends AbstractTable
     }
 
     private int nDistinct(String column) throws Exception {
-
         ResultSet rs = conn.prepareStatement("select count(distinct \"" + column +
                 "\") from \"" + name + "\"")
                 .executeQuery();

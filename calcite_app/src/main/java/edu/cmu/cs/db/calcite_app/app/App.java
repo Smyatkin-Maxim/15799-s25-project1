@@ -43,18 +43,23 @@ import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
 import org.apache.calcite.plan.Contexts;
 import org.apache.calcite.plan.ConventionTraitDef;
 import org.apache.calcite.plan.RelOptCluster;
+import org.apache.calcite.plan.RelOptCost;
 import org.apache.calcite.plan.RelOptCostImpl;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.plan.hep.HepMatchOrder;
 import org.apache.calcite.plan.hep.HepProgram;
+import org.apache.calcite.plan.hep.HepProgramBuilder;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.prepare.CalciteCatalogReader;
 import org.apache.calcite.prepare.Prepare;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.externalize.RelWriterImpl;
+import org.apache.calcite.rel.metadata.ReflectiveRelMetadataProvider;
+import org.apache.calcite.rel.metadata.RelMetadataProvider;
 import org.apache.calcite.rel.rel2sql.RelToSqlConverter;
 import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.rules.JoinPushThroughJoinRule;
@@ -85,6 +90,9 @@ import org.apache.calcite.tools.Programs;
 import org.apache.calcite.tools.RelRunner;
 import org.apache.calcite.tools.RuleSet;
 import org.apache.calcite.tools.RuleSets;
+import org.apache.calcite.rel.metadata.BuiltInMetadata;
+import org.apache.calcite.rel.metadata.ChainedRelMetadataProvider;
+import org.apache.calcite.rel.metadata.DefaultRelMetadataProvider;
 
 import com.google.common.collect.ImmutableList;
 
@@ -105,10 +113,12 @@ public class App {
     static class OptimizeWithTimeout implements Callable<RelNode> {
         private VolcanoPlanner p;
         private RelNode unoptimized;
+        private RelOptCluster cluster;
 
-        OptimizeWithTimeout(VolcanoPlanner planner, RelNode unoptimized) {
+        OptimizeWithTimeout(VolcanoPlanner planner, RelNode unoptimized, RelOptCluster cluster) {
             this.p = planner;
             this.unoptimized = unoptimized;
+            this.cluster = cluster;
         }
 
         @Override
@@ -116,12 +126,15 @@ public class App {
             Program program = Programs.of(RuleSets.ofList(p.getRules()));
             RelTraitSet toTraits = unoptimized.getTraitSet()
                     .replace(EnumerableConvention.INSTANCE);
+            resetMDProviders();
+            unoptimized.getCluster().setMetadataProvider(cluster.getMetadataProvider());
             return program.run(p, unoptimized, toTraits,
                     ImmutableList.of(), ImmutableList.of());
         }
     }
 
     private static RelOptCluster cluster;
+    private static SqlToRelConverter converter;
     private static CalciteConnection conn;
     private static Schema schema;
     private static SqlValidator validator;
@@ -130,7 +143,7 @@ public class App {
     private static Prepare.CatalogReader catalogReader;
     private static Map<String, List<Double>> execTime;
     private static Connection duckConn;
-    private static Boolean runInDuck;
+    private final static Boolean runInDuck = false;
 
     private static void AddEnumerableRules() {
         planner.addRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
@@ -194,7 +207,6 @@ public class App {
         info.setProperty(CalciteConnectionProperty.CASE_SENSITIVE.camelName(), "false");
         conn = DriverManager.getConnection("jdbc:calcite:", info).unwrap(CalciteConnection.class);
         App.schema = conn.getRootSchema();
-        runInDuck = false;
         Class.forName("org.duckdb.DuckDBDriver");
         Properties ro_prop = new Properties();
         ro_prop.setProperty("duckdb.read_only", "true");
@@ -247,58 +259,95 @@ public class App {
         App.planner.addRelTraitDef(ConventionTraitDef.INSTANCE);
     }
 
-    private static RelNode convertToRel(SqlNode validatedNode) {
+    private static void resetMDProviders() {
+        MyNdvProvider myNdvProvider = new MyNdvProvider();
+        RelMetadataProvider customNdvProvider = ReflectiveRelMetadataProvider.reflectiveSource(
+                myNdvProvider,
+                BuiltInMetadata.DistinctRowCount.Handler.class // Explicitly state the handler interface
+        );
+        MySelectivityProvider mySelectivityProvider = new MySelectivityProvider();
+        RelMetadataProvider customSelectivityProvider = ReflectiveRelMetadataProvider.reflectiveSource(
+                mySelectivityProvider,
+                BuiltInMetadata.Selectivity.Handler.class // Explicitly state the handler interface
+        );
+        RelMetadataProvider chainedProvider = ChainedRelMetadataProvider.of(
+                ImmutableList.of(
+                        customNdvProvider,
+                        customSelectivityProvider,
+                        DefaultRelMetadataProvider.INSTANCE));
+        cluster.setMetadataProvider(chainedProvider);
+    }
+
+    private static void createCluster() {
         cluster = RelOptCluster.create(
                 App.planner,
                 new RexBuilder(conn.getTypeFactory()));
+        resetMDProviders();
+    }
+
+    private static void createRelConverter() {
         SqlToRelConverter.Config converterConfig = SqlToRelConverter.config();
         converterConfig.withTrimUnusedFields(true);
         converterConfig.withExpand(false);
 
-        SqlToRelConverter converter = new SqlToRelConverter(
+        converter = new SqlToRelConverter(
                 null,
                 validator,
                 catalogReader,
                 cluster,
                 StandardConvertletTable.INSTANCE,
                 converterConfig);
+    }
 
+    private static RelNode convertToRel(SqlNode validatedNode) {
         return converter.convertQuery(validatedNode, false, true).rel;
     }
 
-    private static RelNode decorellate(RelNode original) {
-        HepProgram hepProgram = HepProgram.builder()
-                .addRuleCollection(
-                        ImmutableList.of(
-                                // SubQuery program rules
-                                CoreRules.FILTER_SUB_QUERY_TO_CORRELATE,
-                                CoreRules.PROJECT_SUB_QUERY_TO_CORRELATE,
-                                CoreRules.JOIN_SUB_QUERY_TO_CORRELATE,
-                                // q19
-                                FilterPullFactorsRule.Config.DEFAULT.toRule()/*,
-                                FilterReorderRule.Config.DEFAULT.toRule()*/))
-                .build();
+    private static RelNode runHepPhase(RelNode original, Boolean bushy) {
+        resetMDProviders();
+        original.getCluster().setMetadataProvider(cluster.getMetadataProvider());
+        HepProgramBuilder builder = HepProgram.builder();
+        builder.addRuleInstance(CoreRules.FILTER_SUB_QUERY_TO_CORRELATE)
+                .addRuleInstance(CoreRules.PROJECT_SUB_QUERY_TO_CORRELATE)
+                .addRuleInstance(CoreRules.JOIN_SUB_QUERY_TO_CORRELATE)
+                .addRuleInstance(FilterPullFactorsRule.Config.DEFAULT.toRule());
+        if (bushy) {
+            builder.addRuleInstance(CoreRules.JOIN_TO_MULTI_JOIN);
+        }
+        builder.addMatchOrder(HepMatchOrder.BOTTOM_UP);
+        HepProgram hepProgram = builder.build();
         Program program = Programs.of(hepProgram, true, cluster.getMetadataProvider());
         RelNode corellated = program.run(cluster.getPlanner(), original, cluster.traitSet(),
                 Collections.emptyList(), Collections.emptyList());
+        // HEP silently overwrites whatever metadata providers you give
+        // What a mess
+        resetMDProviders();
         return RelDecorrelator.decorrelateQuery(corellated);
     }
 
-    private static RelNode optimize(RelNode unoptimizedRelNode) throws Exception {
-        unoptimizedRelNode = decorellate(unoptimizedRelNode);
-
+    private static RelNode runVolcanoPhase(RelNode original, Boolean bushy) throws Exception {
         planner.clear();
         AddEnumerableRules();
 
-        // For whatever reason (perhaps, cardinality misestimates) Calcite likes to pick
-        // poor plans with cartesian product. So I turn them off here
-        planner.addRule(CoreRules.JOIN_COMMUTE.config
-                .withAllowAlwaysTrueCondition(false)
-                .withSwapOuter(true)
-                .toRule());
-        planner.addRule(CoreRules.JOIN_ASSOCIATE.config
-                .withAllowAlwaysTrueCondition(false)
-                .toRule());
+        if (!bushy) {
+            // For whatever reason (perhaps, cardinality misestimates) Calcite likes to pick
+            // poor plans with cartesian product. So I turn them off here
+            planner.addRule(CoreRules.JOIN_COMMUTE.config
+                    .withAllowAlwaysTrueCondition(false)
+                    .withSwapOuter(true)
+                    .toRule());
+            planner.addRule(CoreRules.JOIN_ASSOCIATE.config
+                    .withAllowAlwaysTrueCondition(false)
+                    .toRule());
+            planner.addRule(JoinPushThroughJoinRule.RIGHT);
+            planner.addRule(JoinPushThroughJoinRule.LEFT);
+        } else {
+            planner.addRule(CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY);
+            planner.addRule(CoreRules.MULTI_JOIN_BOTH_PROJECT);
+            planner.addRule(CoreRules.FILTER_MULTI_JOIN_MERGE);
+            planner.addRule(CoreRules.PROJECT_MULTI_JOIN_MERGE);
+            planner.addRule(CoreRules.MULTI_JOIN_BOTH_PROJECT);
+        }
 
         planner.addRule(CoreRules.FILTER_INTO_JOIN);
         planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
@@ -306,13 +355,7 @@ public class App {
         // q20, q17
         // WTF_MOMENT: This rule gives better plan and better runtimes on my tests.
         // But on gradescope it degenerates performance to score 0
-        //planner.addRule(CoreRules.JOIN_DERIVE_IS_NOT_NULL_FILTER_RULE);
-
-        // I thought it's the JOIN_ASSOCIATE`s rule to explore different
-        // join pushdowns/swaps, but it appears that I need these two rules
-        // to properly explore different join orders.
-        planner.addRule(JoinPushThroughJoinRule.RIGHT);
-        planner.addRule(JoinPushThroughJoinRule.LEFT);
+        // planner.addRule(CoreRules.JOIN_DERIVE_IS_NOT_NULL_FILTER_RULE);
 
         planner.addRule(CoreRules.FILTER_AGGREGATE_TRANSPOSE);
         planner.addRule(CoreRules.FILTER_PROJECT_TRANSPOSE);
@@ -344,28 +387,51 @@ public class App {
         planner.addRule(CoreRules.AGGREGATE_EXPAND_DISTINCT_AGGREGATES_TO_JOIN);
 
         // evaluate the most promising conditions first
-        //planner.addRule(FilterReorderRule.Config.DEFAULT.toRule());
+        // planner.addRule(FilterReorderRule.Config.DEFAULT.toRule());
 
+        resetMDProviders();
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        Future<RelNode> future = executor.submit(new OptimizeWithTimeout(planner, unoptimizedRelNode));
+        Future<RelNode> future = executor.submit(new OptimizeWithTimeout(planner, original, cluster));
         executor.shutdown();
         try {
             return future.get(20, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
             System.out.println("Full join ordering timed out. Trying a more narrow search");
+            throw e;
+        } catch (Exception e) {
+            System.out.println("Optimization failure");
+            throw e;
         } finally {
             executor.shutdownNow();
             executor.awaitTermination(10, TimeUnit.SECONDS);
         }
+    }
 
-        // Now try a smaller search space
-        planner.removeRule(CoreRules.JOIN_ASSOCIATE);
-        Program program = Programs.of(RuleSets.ofList(planner.getRules()));
-        RelTraitSet toTraits = unoptimizedRelNode.getTraitSet()
-                .replace(EnumerableConvention.INSTANCE);
-        return program.run(planner, unoptimizedRelNode, toTraits,
-                ImmutableList.of(), ImmutableList.of());
+    private static RelNode optimize(RelNode unoptimizedRelNode) throws Exception {
+        RelNode optimizedBushy = null, optimized = null;
+        try {
+            optimizedBushy = runVolcanoPhase(runHepPhase(unoptimizedRelNode, true), true);
+        } catch (Exception e) {
+        }
+        try {
+            optimized = runVolcanoPhase(runHepPhase(unoptimizedRelNode, false), false);
+        } catch (Exception e) {
+        }
+        if (optimizedBushy == null) {
+            return optimized;
+        } else if (optimized == null) {
+            return optimizedBushy;
+        }
+        RelOptCost costBushy = cluster.getMetadataQuery().getCumulativeCost(optimizedBushy),
+                costNoBushy = cluster.getMetadataQuery().getCumulativeCost(optimized);
+        System.out.println(costBushy);
+        System.out.println(costNoBushy);
+        if (costNoBushy.isLe(costBushy)) {
+            return optimized;
+        } else {
+            return optimizedBushy;
+        }
     }
 
     private static ResultSet executeDuckDBQuery(String query) throws Exception {
@@ -406,7 +472,7 @@ public class App {
         RelNode relNode = convertToRel(validated);
         SerializePlan(relNode, Paths.get(outPath.toString(), filename + ".txt").toFile());
         RelNode optimized = optimize(relNode);
-        SerializePlan(optimized, Paths.get(outPath.toString(), filename + "_optimized.txt").toFile());        
+        SerializePlan(optimized, Paths.get(outPath.toString(), filename + "_optimized.txt").toFile());
 
         planner.clear();
         AddEnumerableRules();
@@ -417,7 +483,7 @@ public class App {
         Files.writeString(Paths.get(outPath.toString(), filename + "_optimized.sql"), optimizedQueryText);
 
         long start = System.currentTimeMillis();
-        
+
         try {
             ResultSet rs = runInDuck ? executeDuckDBQuery(optimizedQueryText) : executeCalciteQuery(optimized);
             String execTime = new Double(System.currentTimeMillis() - start).toString();
@@ -460,6 +526,8 @@ public class App {
         createSchema();
         createValidator();
         createPlanner();
+        createCluster();
+        createRelConverter();
         App.execTime = new HashMap<java.lang.String, List<Double>>();
 
         Set<String> skiplist = new HashSet<String>();
