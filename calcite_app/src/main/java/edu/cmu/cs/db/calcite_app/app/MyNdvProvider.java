@@ -2,10 +2,12 @@ package edu.cmu.cs.db.calcite_app.app;
 
 import java.util.Iterator;
 
+import org.apache.calcite.rel.core.Join;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rel.metadata.RelMdDistinctRowCount;
+import org.apache.calcite.rel.metadata.RelMdUtil;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.NumberUtil;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -42,5 +44,15 @@ public class MyNdvProvider extends RelMdDistinctRowCount {
             System.err.println(e.getMessage());
             return null;
         }
+    }
+
+    @Override
+    @Nullable
+    public Double getDistinctRowCount(Join rel, RelMetadataQuery mq,
+            ImmutableBitSet groupKey, @Nullable RexNode predicate) {
+        Double distincts = RelMdUtil.getJoinDistinctRowCount(mq, rel, rel.getJoinType(),
+                groupKey, predicate, false);
+        //System.out.println(distincts + " dist rows for " + rel.toString());
+        return distincts;
     }
 }

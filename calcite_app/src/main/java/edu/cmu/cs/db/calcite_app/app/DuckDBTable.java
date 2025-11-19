@@ -79,11 +79,9 @@ public class DuckDBTable extends AbstractTable
     @Override
     public Statistic getStatistic() {
         final List<ImmutableBitSet> keys = new ArrayList<>();
-        // NOTE: was hoping that Calcite can use this information for better plans
-        // but instead it generates bogus SQL, at least in duckdb opinion
         for (Column c : columns) {
             if (c.unique) {
-                keys.add(ImmutableBitSet.of(c.id));
+                keys.add(ImmutableBitSet.of(c.id - 1));
             }
         }
         return Statistics.of(cardinality(), keys, new ArrayList<>());

@@ -418,6 +418,7 @@ public class App {
             optimized = runVolcanoPhase(runHepPhase(unoptimizedRelNode, false), false);
         } catch (Exception e) {
         }
+
         if (optimizedBushy == null) {
             return optimized;
         } else if (optimized == null) {
@@ -531,7 +532,7 @@ public class App {
         App.execTime = new HashMap<java.lang.String, List<Double>>();
 
         Set<String> skiplist = new HashSet<String>();
-        int n_runs = 5;
+        int n_runs = 1;
         duckConn.createStatement().execute("PRAGMA disable_optimizer;");
         for (int i = 0; i < n_runs; ++i) {
             for (File sqlfile : files) {
