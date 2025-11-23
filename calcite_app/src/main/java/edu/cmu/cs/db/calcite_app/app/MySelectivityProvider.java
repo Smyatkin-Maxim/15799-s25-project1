@@ -13,7 +13,20 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.SqlKind;
 
 public class MySelectivityProvider extends RelMdSelectivity {
-    
+
+    private Double getLikeSelectivity(DuckDBTable table, RelMetadataQuery mq, @Nullable RexNode operand) {
+        RexInputRef col = (RexInputRef) operand;
+        Double sel = 0.15;
+        try {
+            sel = 1.0 / table.getColumns().get(col.getIndex()).ndv * 10;
+        } catch (Exception e) {
+        }
+        if (sel > 1) {
+            sel = 0.15;
+        }
+        return sel;
+    }
+
     @Override
     public @Nullable Double getSelectivity(TableScan scan, RelMetadataQuery mq, @Nullable RexNode predicate) {
         double sel = 1.0;
@@ -36,23 +49,29 @@ public class MySelectivityProvider extends RelMdSelectivity {
                 }
                 if (col != null) {
                     try {
-                        sel *= 1.0/table.getColumns().get(col.getIndex()).ndv;
+                        sel *= 1.0 / table.getColumns().get(col.getIndex()).ndv;
                         continue;
-                    } catch (Exception e) { }
+                    } catch (Exception e) {
+                    }
                 }
                 sel *= .15;
             } else if (pred.getKind() == SqlKind.IS_NOT_NULL) {
                 sel *= .9;
-            } else if ((pred instanceof RexCall)
-                    && (((RexCall) pred).getOperator() == RelMdUtil.ARTIFICIAL_SELECTIVITY_FUNC)) {
-                artificialSel *= RelMdUtil.getSelectivityValue(pred);
+            } else if ((pred.getKind() == SqlKind.LIKE)) {
+                sel *= getLikeSelectivity(table, mq, ((RexCall) pred).operands.get(0));
+            } else if ((pred.getKind() == SqlKind.NOT)
+                    && (((RexCall) pred).getOperands().get(0).getKind() == SqlKind.LIKE)) {
+                RexCall likeCall = (RexCall) ((RexCall) pred).getOperands().get(0);
+                sel *= (1 - getLikeSelectivity(table, mq, likeCall.operands.get(0)));
             } else if (pred.isA(SqlKind.COMPARISON)) {
                 sel *= .5;
+            } else if ((pred instanceof RexCall
+                    && (((RexCall) pred).getOperator() == RelMdUtil.ARTIFICIAL_SELECTIVITY_FUNC))) {
+                sel *= getLikeSelectivity(table, mq, predicate);
             } else {
                 sel *= .25;
             }
         }
-
         return sel * artificialSel;
     }
 }
