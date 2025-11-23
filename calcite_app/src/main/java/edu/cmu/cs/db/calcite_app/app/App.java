@@ -354,8 +354,11 @@ public class App {
         }
 
         planner.addRule(CoreRules.FILTER_INTO_JOIN);
-        planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
         planner.addRule(CoreRules.JOIN_EXTRACT_FILTER);
+
+        // This rule makes q13 worse (even though it gives a better cost)
+        // planner.addRule(CoreRules.JOIN_CONDITION_PUSH);
+
         // q20, q17
         // WTF_MOMENT: This rule gives better plan and better runtimes on my tests.
         // But on gradescope it degenerates performance to score 0
@@ -538,7 +541,7 @@ public class App {
         App.execTime = new HashMap<java.lang.String, List<Double>>();
 
         Set<String> skiplist = new HashSet<String>();
-        int n_runs = 5;
+        int n_runs = 1;
         duckConn.createStatement().execute("PRAGMA disable_optimizer;");
         for (int i = 0; i < n_runs; ++i) {
             for (File sqlfile : files) {
