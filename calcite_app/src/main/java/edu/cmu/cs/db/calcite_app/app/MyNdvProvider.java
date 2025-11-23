@@ -51,7 +51,7 @@ public class MyNdvProvider extends RelMdDistinctRowCount {
     public Double getDistinctRowCount(Join rel, RelMetadataQuery mq,
             ImmutableBitSet groupKey, @Nullable RexNode predicate) {
         Double distincts = RelMdUtil.getJoinDistinctRowCount(mq, rel, rel.getJoinType(),
-                groupKey, predicate, false);
+                groupKey, predicate, false);                
         //System.out.println(distincts + " dist rows for " + rel.toString());
         return distincts;
     }

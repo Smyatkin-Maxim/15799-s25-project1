@@ -270,10 +270,14 @@ public class App {
                 mySelectivityProvider,
                 BuiltInMetadata.Selectivity.Handler.class // Explicitly state the handler interface
         );
+        MyRowCountProvider myRcProvider = new MyRowCountProvider();
+        RelMetadataProvider customRcProvider = ReflectiveRelMetadataProvider.reflectiveSource(myRcProvider,
+                BuiltInMetadata.RowCount.Handler.class);
         RelMetadataProvider chainedProvider = ChainedRelMetadataProvider.of(
                 ImmutableList.of(
                         customNdvProvider,
                         customSelectivityProvider,
+                        customRcProvider,
                         DefaultRelMetadataProvider.INSTANCE));
         cluster.setMetadataProvider(chainedProvider);
     }
@@ -422,6 +426,7 @@ public class App {
         if (optimizedBushy == null) {
             return optimized;
         } else if (optimized == null) {
+            System.out.println("Picking bushy!");
             return optimizedBushy;
         }
         RelOptCost costBushy = cluster.getMetadataQuery().getCumulativeCost(optimizedBushy),
@@ -431,6 +436,7 @@ public class App {
         if (costNoBushy.isLe(costBushy)) {
             return optimized;
         } else {
+            System.out.println("Picking bushy!");
             return optimizedBushy;
         }
     }
@@ -532,7 +538,7 @@ public class App {
         App.execTime = new HashMap<java.lang.String, List<Double>>();
 
         Set<String> skiplist = new HashSet<String>();
-        int n_runs = 1;
+        int n_runs = 5;
         duckConn.createStatement().execute("PRAGMA disable_optimizer;");
         for (int i = 0; i < n_runs; ++i) {
             for (File sqlfile : files) {
