@@ -35,8 +35,13 @@ public class FilterReorderRule extends RelRule<FilterReorderRule.Config>
     @Override
     public boolean matches(final RelOptRuleCall call) {
         final Filter filter = call.rel(0);
-        return !reorderCondition(filter, filter.getCondition(), call.getMetadataQuery(), filter.getCluster().getRexBuilder()).toString().
-            equals(filter.getCondition().toString());
+        final RelMetadataQuery mq = call.getMetadataQuery();
+        final RelBuilder relBuilder = call.builder();
+        final RexBuilder rexBuilder = filter.getCluster().getRexBuilder();
+        RexNode newCondition = reorderCondition(filter, filter.getCondition(), mq, rexBuilder);
+        relBuilder.push(filter.getInput()).filter(newCondition);
+        final Filter newFilter = (Filter)relBuilder.build();
+        return !newFilter.getCondition().toString().equals(filter.getCondition().toString());
     }
 
     @Override
@@ -46,10 +51,9 @@ public class FilterReorderRule extends RelRule<FilterReorderRule.Config>
         final RelBuilder relBuilder = call.builder();
         final RexBuilder rexBuilder = filter.getCluster().getRexBuilder();
         RexNode newCondition = reorderCondition(filter, filter.getCondition(), mq, rexBuilder);
-        System.out.println("Was " + filter.getCondition().toString());
-        System.out.println("Now " + newCondition.toString());
         relBuilder.push(filter.getInput()).filter(newCondition);
-        call.transformTo(relBuilder.build());
+        final Filter newFilter = (Filter)relBuilder.build();
+        call.transformTo(newFilter);
     }
 
     /** Rule configuration. */

@@ -315,6 +315,7 @@ public class App {
                 .addRuleInstance(CoreRules.PROJECT_SUB_QUERY_TO_CORRELATE)
                 .addRuleInstance(CoreRules.JOIN_SUB_QUERY_TO_CORRELATE)
                 .addRuleInstance(FilterPullFactorsRule.Config.DEFAULT.toRule());
+                //.addRuleInstance(FilterReorderRule.Config.DEFAULT.toRule());
         if (bushy) {
             builder.addRuleInstance(CoreRules.JOIN_TO_MULTI_JOIN);
         }
@@ -392,9 +393,6 @@ public class App {
         // perhaps it simply has to be implemented. But instead we rewrite it to a join
         // with group by
         planner.addRule(CoreRules.AGGREGATE_EXPAND_DISTINCT_AGGREGATES_TO_JOIN);
-
-        // evaluate the most promising conditions first
-        // planner.addRule(FilterReorderRule.Config.DEFAULT.toRule());
 
         resetMDProviders();
         ExecutorService executor = Executors.newSingleThreadExecutor();
