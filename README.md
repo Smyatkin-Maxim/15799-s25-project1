@@ -12,7 +12,6 @@ The final submission looked like this:
 | solution  | score | median speedup | mean speedup | num >= x1.5 speedup | num timeout
 |--|--|--|--|--|--|
 | my | 107.6 | 1.357 | 534.593 | 21 | 0 |
-|--|--|--|--|--|--|
 | refsol | 90.8 | 1.025 | 1.046 | 3 | 3 |
 
   
